@@ -58,7 +58,8 @@ async function waitForReady(deploymentId, maxMs = 180_000) {
   throw new Error("deployment timed out");
 }
 
-async function updateFunctionFrontendUrl(frontendUrl) {
+async function updateFunctionEnv(frontendUrl) {
+  const oauthRedirectUri = `${frontendUrl}/oauth/callback`;
   const { functions } = await api("/functions");
   for (const fn of functions ?? []) {
     const res = await fetch(`${apiBase}/functions/${fn.name}/env`, {
@@ -67,13 +68,18 @@ async function updateFunctionFrontendUrl(frontendUrl) {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ envVars: { FRONTEND_URL: frontendUrl } }),
+      body: JSON.stringify({
+        envVars: {
+          FRONTEND_URL: frontendUrl,
+          SLACK_REDIRECT_URI: oauthRedirectUri,
+        },
+      }),
     });
     if (!res.ok) {
       const text = await res.text();
       console.warn(`  ⚠ could not patch ${fn.name} env: ${res.status} ${text}`);
     } else {
-      console.log(`  ✓ FRONTEND_URL → ${fn.name}`);
+      console.log(`  ✓ FRONTEND_URL + SLACK_REDIRECT_URI → ${fn.name}`);
     }
   }
 }
@@ -129,7 +135,7 @@ const ready = await waitForReady(deploymentId);
 const frontendUrl = ready.url.replace(/\/$/, "");
 
 console.log(`\nFrontend live at: ${frontendUrl}`);
-console.log("Updating FRONTEND_URL on all functions…");
-await updateFunctionFrontendUrl(frontendUrl);
+console.log("Updating FRONTEND_URL + SLACK_REDIRECT_URI on all functions…");
+await updateFunctionEnv(frontendUrl);
 
-console.log("\nDone. OAuth redirects will use the hosted URL.");
+console.log(`\nDone. Slack redirect URL: ${frontendUrl}/oauth/callback`);

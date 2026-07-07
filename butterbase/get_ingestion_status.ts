@@ -23,6 +23,28 @@ export default async function handler(req: Request, ctx: FunctionContext): Promi
     const job = jobs[0];
     if (!job) return json({ error: "job_not_found" }, 404);
 
+    const { rows: recentMessages } = await ctx.db.query(
+      `SELECT channel_name, text, ts, enrichment_status
+       FROM slack_messages
+       WHERE slack_user_id = $1
+       ORDER BY ts DESC NULLS LAST
+       LIMIT 25`,
+      [session.slack_user_id],
+    ).catch(() => ({ rows: [] as Record<string, unknown>[] }));
+
+    const { rows: enrichCounts } = await ctx.db.query(
+      `SELECT enrichment_status, COUNT(*)::int AS count
+       FROM slack_messages
+       WHERE slack_user_id = $1
+       GROUP BY enrichment_status`,
+      [session.slack_user_id],
+    );
+
+    const enrichment_totals: Record<string, number> = {};
+    for (const row of enrichCounts) {
+      enrichment_totals[row.enrichment_status as string] = row.count as number;
+    }
+
     return json({
       user: {
         id: session.slack_user_id,
@@ -39,6 +61,13 @@ export default async function handler(req: Request, ctx: FunctionContext): Promi
         started_at: job.started_at,
         finished_at: job.finished_at,
       },
+      recent_messages: recentMessages.map((m) => ({
+        channel_name: (m.channel_name as string) || "channel",
+        text: ((m.text as string) || "").slice(0, 280),
+        ts: m.ts as string,
+        enrichment_status: (m.enrichment_status as string) || "pending",
+      })),
+      enrichment_totals,
     });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : "unauthorized" }, 401);

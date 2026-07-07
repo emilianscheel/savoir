@@ -51,10 +51,12 @@ const toDeploy = deployOnly?.length
   ? manifest.functions.filter((fn) => deployOnly.includes(fn.name))
   : manifest.functions;
 
+const frontendUrl = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, "");
+
 const envVars = {
   FUNCTIONS_BASE_URL: `https://api.butterbase.ai/v1/${appId}/fn`,
-  FRONTEND_URL: process.env.FRONTEND_URL || "http://localhost:3000",
-  SLACK_REDIRECT_URI: `https://api.butterbase.ai/v1/${appId}/fn/slack_oauth_callback`,
+  FRONTEND_URL: frontendUrl,
+  SLACK_REDIRECT_URI: `${frontendUrl}/oauth/callback`,
   SESSION_JWT_SECRET: process.env.SESSION_JWT_SECRET || "df61a671fa83e0d7187769a96947a871bfff4afc711a6874c256f8f23af9fbbe",
   INTERNAL_CRON_SECRET: process.env.INTERNAL_CRON_SECRET || "9c454b368509452d1c1933208854e24dfdfed5501583c5743ce7870063d481f8",
   NEO4J_URI: process.env.NEO4J_URI,

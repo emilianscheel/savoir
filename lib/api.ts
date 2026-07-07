@@ -41,3 +41,20 @@ export async function invokeFunction<T>(
 export function oauthStartUrl(step: "workspace" | "user" | "full" = "full"): string {
   return `${functionsBase()}/slack_oauth_start?step=${step}`;
 }
+
+export async function exchangeOAuthCode(
+  code: string,
+  state?: string | null,
+): Promise<{ access_token: string; job_id?: string }> {
+  const url = new URL(`${functionsBase()}/slack_oauth_callback`);
+  url.searchParams.set("code", code);
+  url.searchParams.set("json", "1");
+  if (state) url.searchParams.set("state", state);
+
+  const res = await fetch(url.toString());
+  const data = (await res.json()) as { access_token?: string; job_id?: string; error?: string };
+  if (!res.ok || !data.access_token) {
+    throw new Error(data.error || "OAuth exchange failed");
+  }
+  return { access_token: data.access_token, job_id: data.job_id };
+}

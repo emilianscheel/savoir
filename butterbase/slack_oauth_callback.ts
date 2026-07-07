@@ -14,14 +14,38 @@ interface OAuthState {
   ts?: number;
 }
 
+function finishOAuth(
+  ctx: FunctionContext,
+  wantsJson: boolean,
+  session: { access_token: string; job_id?: string },
+): Response {
+  if (wantsJson) return json(session);
+  const qs = new URLSearchParams({
+    access_token: session.access_token,
+    ...(session.job_id ? { job_id: session.job_id } : {}),
+  });
+  return redirect(`${frontendUrl(ctx, "/onboarding")}?${qs.toString()}`);
+}
+
+function oauthError(
+  ctx: FunctionContext,
+  wantsJson: boolean,
+  path: string,
+  message?: string,
+): Response {
+  if (wantsJson) return json({ error: message || "oauth_failed" }, 400);
+  return redirect(frontendUrl(ctx, path));
+}
+
 export default async function handler(req: Request, ctx: FunctionContext): Promise<Response> {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
   const error = url.searchParams.get("error");
   const stateRaw = url.searchParams.get("state");
+  const wantsJson = url.searchParams.get("json") === "1";
 
   if (error) {
-    return redirect(frontendUrl(ctx, `/signin?error=${encodeURIComponent(error)}`));
+    return oauthError(ctx, wantsJson, `/signin?error=${encodeURIComponent(error)}`, error);
   }
   if (!code) {
     return json({ error: "missing_code" }, 400);
@@ -63,8 +87,11 @@ export default async function handler(req: Request, ctx: FunctionContext): Promi
   };
 
   if (!oauth.ok || !oauth.team?.id) {
-    return redirect(
-      frontendUrl(ctx, `/signin?error=${encodeURIComponent(oauth.error || "oauth_failed")}`),
+    return oauthError(
+      ctx,
+      wantsJson,
+      `/signin?error=${encodeURIComponent(oauth.error || "oauth_failed")}`,
+      oauth.error || "oauth_failed",
     );
   }
 
@@ -85,8 +112,11 @@ export default async function handler(req: Request, ctx: FunctionContext): Promi
   const workspaceId = wsRows[0]?.id as string;
 
   if (!oauth.authed_user?.id || !oauth.authed_user.access_token) {
-    return redirect(
-      frontendUrl(ctx, `/signin?workspace=${workspaceId}&step=user_needed`),
+    return oauthError(
+      ctx,
+      wantsJson,
+      `/signin?workspace=${workspaceId}&step=user_needed`,
+      "user_needed",
     );
   }
 
@@ -174,9 +204,8 @@ export default async function handler(req: Request, ctx: FunctionContext): Promi
     slack_workspace_id: workspaceId,
   });
 
-  const qs = new URLSearchParams({
+  return finishOAuth(ctx, wantsJson, {
     access_token: sessionToken,
-    ...(jobId ? { job_id: jobId } : {}),
+    job_id: jobId,
   });
-  return redirect(`${frontendUrl(ctx, "/onboarding")}?${qs.toString()}`);
 }

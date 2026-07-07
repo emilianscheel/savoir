@@ -41,10 +41,13 @@ for (const file of fs.readdirSync(path.join(root, "butterbase")).filter(f => f.e
 }
 '
 
+FRONTEND_BASE="${FRONTEND_URL:-http://localhost:3000}"
+FRONTEND_BASE="${FRONTEND_BASE%/}"
+
 common_env=(
   --env "FUNCTIONS_BASE_URL=https://api.butterbase.ai/v1/${APP_ID}/fn"
-  --env "FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}"
-  --env "SLACK_REDIRECT_URI=https://api.butterbase.ai/v1/${APP_ID}/fn/slack_oauth_callback"
+  --env "FRONTEND_URL=${FRONTEND_BASE}"
+  --env "SLACK_REDIRECT_URI=${FRONTEND_BASE}/oauth/callback"
   --env "SESSION_JWT_SECRET=${SESSION_JWT_SECRET}"
   --env "INTERNAL_CRON_SECRET=${INTERNAL_CRON_SECRET}"
   --env "NEO4J_URI=${NEO4J_URI:?NEO4J_URI required}"

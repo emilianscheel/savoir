@@ -6,7 +6,7 @@ const CANONICAL = (
   process.env.NEXT_PUBLIC_APP_URL || "https://aws-builder-hackathon.butterbase.dev"
 ).replace(/\/$/, "");
 
-const APP_ROUTES = ["/signin", "/onboarding", "/dashboard", "/connect"];
+const APP_ROUTES = ["/signin", "/onboarding", "/dashboard", "/connect", "/oauth/callback"];
 
 function appPathFrom(pathname: string): string {
   for (const route of APP_ROUTES) {

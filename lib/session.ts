@@ -8,6 +8,7 @@ export interface SessionData {
 export function saveSession(data: SessionData): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(SESSION_KEY, JSON.stringify(data));
+  window.dispatchEvent(new Event("savoir:session-changed"));
 }
 
 export function loadSession(): SessionData | null {
@@ -24,6 +25,7 @@ export function loadSession(): SessionData | null {
 export function clearSession(): void {
   if (typeof window === "undefined") return;
   localStorage.removeItem(SESSION_KEY);
+  window.dispatchEvent(new Event("savoir:session-changed"));
 }
 
 /** Parse #access_token=... from OAuth redirect hash (legacy). */

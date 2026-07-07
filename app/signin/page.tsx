@@ -1,10 +1,13 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, useLayoutEffect, useState } from "react";
+import Link from "next/link";
+import { CheckCircle2 } from "lucide-react";
 import { AppShell } from "../components/AppShell";
 import { PageHeader } from "../components/PageHeader";
 import { oauthStartUrl } from "@/lib/api";
+import { loadSession } from "@/lib/session";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 
@@ -12,6 +15,33 @@ function SignInContent() {
   const params = useSearchParams();
   const error = params.get("error");
   const step = params.get("step");
+  const [connected, setConnected] = useState(false);
+
+  useLayoutEffect(() => {
+    const sync = () => setConnected(!!loadSession()?.access_token);
+    sync();
+    window.addEventListener("savoir:session-changed", sync);
+    return () => window.removeEventListener("savoir:session-changed", sync);
+  }, []);
+
+  if (connected) {
+    return (
+      <AppShell>
+        <PageHeader
+          title="Slack connected"
+          description="Your workspace is linked. Continue to indexing."
+        />
+        <Button
+          className="w-full bg-emerald-600 hover:bg-emerald-700"
+          render={<Link href="/onboarding" />}
+          nativeButton={false}
+        >
+          <CheckCircle2 data-icon="inline-start" />
+          View indexing progress
+        </Button>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell>
