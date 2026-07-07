@@ -1,6 +1,7 @@
 import {
   chatCompletion,
   json,
+  neo4jQuery,
   queryNeo4jContext,
   requireEnv,
   slackApi,
@@ -22,17 +23,21 @@ async function findUserDmChannel(token: string, userId: string): Promise<string 
   return list.channels.find((c) => c.user === userId)?.id ?? null;
 }
 
+type SlackBlock = Record<string, unknown>;
+
 async function postBotReply(
   token: string,
   channel: string,
   threadTs: string,
   text: string,
   userId?: string,
+  blocks?: SlackBlock[],
 ): Promise<void> {
   const res = await slackApi("chat.postMessage", token, {
     channel,
     thread_ts: threadTs,
     text,
+    blocks: blocks ? JSON.stringify(blocks) : undefined,
   });
   if (res.ok) return;
 
@@ -47,23 +52,24 @@ async function postBotReply(
       "I couldn't reply in that channel because I'm not a member. " +
       "Run `/invite @Savoir` there, or read my answer here:\n\n" +
       text,
+      blocks: blocks ? JSON.stringify(blocks) : undefined,
   });
 }
 
 async function findWorkspace(
   ctx: FunctionContext,
   teamIds: string[],
-): Promise<{ bot_access_token: string; ingestion_ready: boolean; graph_team_id: string } | null> {
+): Promise<{ bot_access_token: string; ingestion_ready: boolean; graph_team_id: string; workspace_id: string; team_name: string } | null> {
   const ids = [...new Set(teamIds.filter(Boolean))];
   if (ids.length === 0) return null;
 
   const { rows } = await ctx.db.query(
-    `SELECT sw.bot_access_token, sw.slack_team_id,
+    `SELECT sw.id, sw.team_name, sw.bot_access_token, sw.slack_team_id,
             bool_or(su.ingestion_status = 'complete') AS ingestion_ready
      FROM slack_workspaces sw
      JOIN slack_users su ON su.slack_workspace_id = sw.id
      WHERE sw.slack_team_id = ANY($1::text[])
-     GROUP BY sw.id, sw.bot_access_token, sw.slack_team_id
+     GROUP BY sw.id, sw.team_name, sw.bot_access_token, sw.slack_team_id
      LIMIT 1`,
     [ids],
   );
@@ -73,7 +79,225 @@ async function findWorkspace(
     bot_access_token: row.bot_access_token as string,
     ingestion_ready: row.ingestion_ready === true,
     graph_team_id: row.slack_team_id as string,
+    workspace_id: row.id as string,
+    team_name: (row.team_name as string) || row.slack_team_id as string,
   };
+}
+
+
+function wantsIntegrationStatus(question: string): boolean {
+  return /\b(status|health|integration|integrations|connected|connection|connections|pipeline|sponsors|stack)\b/i.test(
+    question,
+  );
+}
+
+function statusIcon(ok: boolean, warn = false): string {
+  if (ok) return "✅";
+  if (warn) return "⚠️";
+  return "❌";
+}
+
+async function getButterbaseStatus(
+  ctx: FunctionContext,
+  workspaceId: string,
+): Promise<{ ok: boolean; line: string; details: string[] }> {
+  const { rows: messageRows } = await ctx.db.query(
+    `SELECT COUNT(*)::int AS messages,
+            COUNT(DISTINCT channel_id)::int AS channels,
+            COUNT(*) FILTER (WHERE enrichment_status = 'done')::int AS enriched,
+            COUNT(*) FILTER (WHERE neo4j_merged_at IS NOT NULL)::int AS merged
+     FROM slack_messages
+     WHERE slack_workspace_id = $1`,
+    [workspaceId],
+  );
+  const { rows: jobRows } = await ctx.db.query(
+    `SELECT ij.status, ij.fetched_messages, ij.completed_channels, ij.total_channels
+     FROM ingestion_jobs ij
+     JOIN slack_users su ON su.id = ij.slack_user_id
+     WHERE su.slack_workspace_id = $1
+     ORDER BY ij.created_at DESC
+     LIMIT 1`,
+    [workspaceId],
+  );
+
+  const counts = messageRows[0] ?? {};
+  const job = jobRows[0] ?? {};
+  const messages = Number(counts.messages ?? 0);
+  const channels = Number(counts.channels ?? 0);
+  const enriched = Number(counts.enriched ?? 0);
+  const merged = Number(counts.merged ?? 0);
+  const jobStatus = String(job.status ?? "no job yet");
+
+  return {
+    ok: true,
+    line: `${messages} messages from ${channels} chats indexed; latest job: ${jobStatus}`,
+    details: [
+      `Fetched: ${job.fetched_messages ?? messages} messages`,
+      `Channels: ${job.completed_channels ?? 0}/${job.total_channels ?? channels}`,
+      `Enriched: ${enriched}`,
+      `Merged to Neo4j: ${merged}`,
+    ],
+  };
+}
+
+async function getNeo4jStatus(
+  ctx: FunctionContext,
+  teamId: string,
+): Promise<{ ok: boolean; line: string; details: string[] }> {
+  try {
+    const rows = await neo4jQuery(
+      ctx,
+      `
+      MATCH (team:Team {slack_team_id: $teamId})
+      OPTIONAL MATCH (team)<-[:MEMBER_OF]-(person:Person)
+      OPTIONAL MATCH (person)-[:POSTED]->(message:SlackMessage)
+      OPTIONAL MATCH (message)-[:MENTIONS]->(topic:Topic)
+      RETURN count(DISTINCT person) AS people,
+             count(DISTINCT message) AS messages,
+             count(DISTINCT topic) AS topics
+      `,
+      { teamId },
+    );
+    const row = rows[0] ?? {};
+    const people = Number(row.people ?? row["0"] ?? 0);
+    const messages = Number(row.messages ?? row["1"] ?? 0);
+    const topics = Number(row.topics ?? row["2"] ?? 0);
+    return {
+      ok: true,
+      line: `${people} people, ${messages} Slack messages, ${topics} topics in the graph`,
+      details: [
+        "Graph query succeeded",
+        `Team node: ${teamId}`,
+        `Expertise evidence paths available: ${messages > 0 ? "yes" : "not yet"}`,
+      ],
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      line: "Neo4j query failed or credentials are missing",
+      details: [err instanceof Error ? err.message.slice(0, 180) : "Unknown Neo4j error"],
+    };
+  }
+}
+
+function getRocketRideStatus(ctx: FunctionContext): { ok: boolean; warn: boolean; line: string; details: string[] } {
+  const webhook = ctx.env.ROCKETRIDE_WEBHOOK_URL;
+  const token = ctx.env.ROCKETRIDE_TOKEN;
+  const auth = ctx.env.ROCKETRIDE_AUTH || ctx.env.ROCKETRIDE_APIKEY;
+  const bridge = ctx.env.ROCKETRIDE_BRIDGE_SECRET;
+
+  if (webhook) {
+    return {
+      ok: true,
+      warn: false,
+      line: "RocketRide bridge webhook is configured for message enrichment",
+      details: [
+        `Webhook: ${webhook.replace(/\/[^/]*$/, "/…")}`,
+        `Pipeline token: ${token ? "set" : "not set"}`,
+        `Cloud auth: ${auth ? "set" : "not set"}`,
+      ],
+    };
+  }
+
+  return {
+    ok: false,
+    warn: true,
+    line: "RocketRide webhook is not configured; enrichment falls back to Nebius/OpenAI inline",
+    details: [
+      `Bridge secret: ${bridge ? "set" : "not set"}`,
+      `Cloud auth: ${auth ? "set" : "not set"}`,
+      "Set ROCKETRIDE_WEBHOOK_URL to make RocketRide load-bearing in the demo.",
+    ],
+  };
+}
+
+function fields(title: string, items: string[]): SlackBlock {
+  return {
+    type: "section",
+    text: {
+      type: "mrkdwn",
+      text: `*${title}*\n${items.map((item) => `• ${item}`).join("\n")}`,
+    },
+  };
+}
+
+function renderIntegrationStatusBlocks(input: {
+  teamName: string;
+  butterbase: { ok: boolean; line: string; details: string[] };
+  neo4j: { ok: boolean; line: string; details: string[] };
+  rocketRide: { ok: boolean; warn: boolean; line: string; details: string[] };
+}): SlackBlock[] {
+  const { teamName, butterbase, neo4j, rocketRide } = input;
+  return [
+    {
+      type: "header",
+      text: { type: "plain_text", text: "Savoir integration status", emoji: true },
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text:
+          `Workspace: *${teamName}*\n` +
+          "`Slack → Butterbase → RocketRide → Neo4j → Slack bot`",
+      },
+    },
+    { type: "divider" },
+    {
+      type: "section",
+      fields: [
+        { type: "mrkdwn", text: `*Butterbase*\n${statusIcon(butterbase.ok)} ${butterbase.line}` },
+        { type: "mrkdwn", text: `*Neo4j*\n${statusIcon(neo4j.ok)} ${neo4j.line}` },
+        {
+          type: "mrkdwn",
+          text: `*RocketRide*\n${statusIcon(rocketRide.ok, rocketRide.warn)} ${rocketRide.line}`,
+        },
+      ],
+    },
+    fields("Butterbase evidence", butterbase.details),
+    fields("Neo4j evidence", neo4j.details),
+    fields("RocketRide evidence", rocketRide.details),
+    {
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text: "Ask `@Savoir who should I ask about <topic>?` after the graph has indexed messages.",
+        },
+      ],
+    },
+  ];
+}
+
+async function postIntegrationStatus(
+  ctx: FunctionContext,
+  workspace: {
+    bot_access_token: string;
+    graph_team_id: string;
+    workspace_id: string;
+    team_name: string;
+  },
+  event: { user?: string; channel?: string; ts?: string; thread_ts?: string },
+): Promise<void> {
+  const [butterbase, neo4j] = await Promise.all([
+    getButterbaseStatus(ctx, workspace.workspace_id),
+    getNeo4jStatus(ctx, workspace.graph_team_id),
+  ]);
+  const rocketRide = getRocketRideStatus(ctx);
+  const blocks = renderIntegrationStatusBlocks({
+    teamName: workspace.team_name,
+    butterbase,
+    neo4j,
+    rocketRide,
+  });
+  await postBotReply(
+    workspace.bot_access_token,
+    event.channel!,
+    event.thread_ts || event.ts!,
+    `Savoir integration status for ${workspace.team_name}: Butterbase ${butterbase.ok ? "connected" : "not ready"}, Neo4j ${neo4j.ok ? "connected" : "not ready"}, RocketRide ${rocketRide.ok ? "configured" : "needs configuration"}.`,
+    event.user,
+    blocks,
+  );
 }
 
 async function answerMention(
@@ -95,9 +319,14 @@ async function answerMention(
       token,
       channel,
       threadTs,
-      "Ask me something after @Savoir — for example: `@Savoir what meetings are coming up?`",
+      "Ask me something after @Savoir — for example: `@Savoir integration status` or `@Savoir who should I ask about Slack ingestion failures?`",
       userId,
     );
+    return;
+  }
+
+  if (wantsIntegrationStatus(question)) {
+    await postIntegrationStatus(ctx, workspace, event);
     return;
   }
 

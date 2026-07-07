@@ -32,15 +32,9 @@ interface IngestionStatus {
 }
 
 export default function OnboardingPage() {
-  const [session, setSession] = useState<SessionData | null>(null);
+  const [session] = useState<SessionData | null>(() => applySessionFromHash() || loadSession());
   const [status, setStatus] = useState<IngestionStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fromHash = applySessionFromHash();
-    const s = fromHash || loadSession();
-    setSession(s);
-  }, []);
 
   const poll = useCallback(async () => {
     const s = loadSession();
@@ -63,8 +57,10 @@ export default function OnboardingPage() {
   }, []);
 
   useEffect(() => {
-    poll();
-    const id = setInterval(poll, 2000);
+    void Promise.resolve().then(poll);
+    const id = setInterval(() => {
+      void poll();
+    }, 2000);
     return () => clearInterval(id);
   }, [poll, session]);
 

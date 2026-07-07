@@ -46,7 +46,7 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    load();
+    void Promise.resolve().then(load);
   }, [load]);
 
   return (
