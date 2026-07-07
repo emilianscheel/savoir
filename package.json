@@ -10,6 +10,7 @@
     "neo4j:schema": "node scripts/apply-neo4j-schema.mjs",
     "smoke:nebius": "node scripts/smoke-test-nebius.mjs",
     "deploy:butterbase": "node scripts/deploy-butterbase-api.mjs",
+    "deploy:frontend": "node scripts/deploy-butterbase-frontend.mjs",
     "re-enrich": "node scripts/re-enrich-messages.mjs",
     "rocketride:start": "node scripts/start-rocketride-pipeline.mjs",
     "rocketride:bridge": "node scripts/rocketride-bridge.mjs"
@@ -34,6 +35,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "archiver": "^8.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
     "tailwindcss": "^4",

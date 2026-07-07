@@ -1,21 +1,162 @@
-# savoir
+# Savoir
 
-**Slack knowledge platform** for **HackwithBay 3.0 / AWS Builder Hackathon**.
+**Slack knowledge platform** — HackwithBay 3.0 / AWS Builder Hackathon.
 
-Next.js static frontend on [Butterbase](https://butterbase.ai), Slack OAuth ingestion into Postgres + Neo4j, and a Slack bot that answers from the graph via Nebius (OpenAI-compatible LLM).
+Turn Slack history into a searchable knowledge graph and answer questions in Slack with AI.
+
+**Live app:** https://aws-builder-hackathon.butterbase.dev  
+**Sign in:** https://aws-builder-hackathon.butterbase.dev/signin
 
 ---
 
-## Features
+## Tools we used
+
+| Tool | Role in Savoir |
+| ---- | -------------- |
+| **[Slack](https://api.slack.com/)** | OAuth, message history, Events API, `@mention` bot replies |
+| **[Butterbase](https://butterbase.ai/)** | Serverless functions, Postgres database, static frontend hosting |
+| **[Neo4j Aura](https://neo4j.com/cloud/aura/)** | Knowledge graph — teams, people, messages, topics |
+| **[Nebius Token Factory](https://nebius.com/)** | Primary LLM inference (OpenAI-compatible API, Kimi K2.7 Code) |
+| **[RocketRide](https://rocketride.ai/)** | Optional cloud enrichment pipeline (webhook → extract → LLM) |
+| **[OpenAI](https://platform.openai.com/)** | Fallback LLM + RocketRide pipeline profile (`gpt-4o-mini`) |
+| **Next.js** | Static frontend (`/signin`, `/onboarding`, `/dashboard`) |
+| **Postgres** | Raw Slack messages, ingestion jobs, tokens (via Butterbase) |
+
+---
+
+## The pipeline (end to end)
+
+This is how data flows through Savoir from sign-in to bot answers.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  1. CONNECT                                                             │
+│     User → /signin → Slack OAuth → tokens saved in Postgres             │
+│     → session JWT → redirect to /onboarding                             │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  2. BACKFILL (history)                                                  │
+│     ingest_next_chunk  (cron + self-chain)                              │
+│     → Slack conversations.history                                       │
+│     → rows in slack_messages (Postgres)                                 │
+│     → progress shown on /onboarding                                     │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  3. ENRICH (per message)                                                │
+│     enrich_and_merge                                                    │
+│                                                                         │
+│     Path A — inline (default):                                          │
+│       Nebius Kimi → summary + topic tags                                │
+│                                                                         │
+│     Path B — RocketRide (optional, set ROCKETRIDE_WEBHOOK_URL):         │
+│       Butterbase → RocketRide bridge → slack_ingest.pipe                │
+│       → extract_data + LLM → callback to enrich_and_merge               │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  4. GRAPH (Neo4j)                                                       │
+│     mergeMessageToNeo4j                                                   │
+│     → Person, Team, SlackMessage, Topic nodes + relationships           │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                    ┌───────────────┴───────────────┐
+                    ▼                               ▼
+┌──────────────────────────────┐   ┌──────────────────────────────────────┐
+│  5. LIVE MESSAGES            │   │  6. DASHBOARD                        │
+│     slack_events             │   │     generate_workspace_summary       │
+│     → new Slack message      │   │     → workspace digest in Postgres   │
+│     → enrich_and_merge       │   │     get_dashboard_data → /dashboard    │
+│     → Neo4j updated          │   └──────────────────────────────────────┘
+└──────────────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  7. BOT Q&A                                                             │
+│     User @mentions bot in Slack                                         │
+│     → slack_events (verify signature, ack fast)                         │
+│     → slack_bot_answer                                                  │
+│     → query Neo4j for context                                           │
+│     → Nebius Kimi generates answer                                      │
+│     → chat.postMessage reply in thread                                  │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Step-by-step (plain English)
+
+1. **Connect** — User authorizes Slack once. We store workspace + user tokens and start a session.
+2. **Backfill** — `ingest_next_chunk` pulls channel history in chunks until the job is complete.
+3. **Enrich** — Each message gets a short summary and topic tags via **Nebius Kimi**, or via **RocketRide** if configured.
+4. **Graph** — Enriched messages are merged into **Neo4j** (people, teams, topics, message nodes).
+5. **Live** — New Slack messages hit `slack_events` and go through the same enrich → graph path.
+6. **Dashboard** — A precomputed digest and per-channel stats appear on `/dashboard`.
+7. **Bot** — `@Savoir` questions pull graph context from Neo4j and answer with Kimi.
+
+---
+
+## Frontend routes
 
 | Route | Purpose |
 | ----- | ------- |
 | `/` | Landing page |
-| `/signin` | Connect Slack — workspace install + user authorization |
-| `/onboarding` | Live ingestion progress (channels + message counts) |
-| `/dashboard` | Workspace digest + per-channel stats |
+| `/signin` | Connect Slack (one-time — gets the session token) |
+| `/onboarding` | Live indexing progress after OAuth |
+| `/dashboard` | Workspace digest + channel stats |
 
-**Backend flow:** OAuth → chunked Slack history fetch → Nebius enrichment → Neo4j merge → Slack Events for new messages → `@bot` answers from Neo4j context.
+---
+
+## Butterbase functions
+
+| Function | Pipeline step |
+| -------- | ------------- |
+| `slack_oauth_start` | Redirect to Slack OAuth |
+| `slack_oauth_callback` | Save tokens, start ingestion, mint session JWT |
+| `ingest_next_chunk` | Resumable Slack history fetch (cron + chain) |
+| `get_ingestion_status` | Poll job progress for `/onboarding` |
+| `enrich_and_merge` | LLM enrichment → Neo4j merge |
+| `slack_events` | Slack Events API entry point |
+| `slack_bot_answer` | Neo4j context + Kimi → Slack reply |
+| `generate_workspace_summary` | Build dashboard digest |
+| `get_dashboard_data` | Dashboard API |
+
+Shared helpers: `butterbase/shared/runtime.ts` (Slack, JWT, Neo4j, Nebius, RocketRide routing).
+
+---
+
+## Neo4j graph model
+
+Nodes: `Team`, `Person`, `SlackMessage`, `Topic` (plus optional `Project`, `Skill`, etc.)
+
+Schema file: [`butterbase/graph-schema.cypher`](butterbase/graph-schema.cypher)
+
+```bash
+npm run neo4j:schema
+# or: cat butterbase/graph-schema.cypher | neo4j-cli query --credential aura --rw
+```
+
+---
+
+## RocketRide (optional)
+
+When `ROCKETRIDE_WEBHOOK_URL` is set, enrichment can run through RocketRide instead of inline Nebius:
+
+```
+Butterbase enrich_and_merge
+  → POST ROCKETRIDE_WEBHOOK_URL (local bridge or cloud)
+  → pipelines/slack_ingest.pipe (extract_data → LLM)
+  → callback enrich_and_merge → Neo4j
+```
+
+```bash
+npm run rocketride:bridge    # local HTTP bridge
+npm run rocketride:start     # start slack_ingest.pipe on RocketRide
+```
+
+Pipeline files: `pipelines/slack_ingest.pipe`, `pipelines/chat.pipe`
 
 ---
 
@@ -29,47 +170,45 @@ cp .env.example .env.local   # fill in values
 npm run dev                  # http://localhost:3000
 ```
 
-Deploy schema + functions to Butterbase (see below), then open `/signin`.
+Deploy:
+
+```bash
+FRONTEND_URL=https://aws-builder-hackathon.butterbase.dev npm run deploy:butterbase
+FRONTEND_URL=https://aws-builder-hackathon.butterbase.dev npm run deploy:frontend
+```
 
 ---
 
 ## Slack app setup
 
 1. Create a Slack app at [api.slack.com/apps](https://api.slack.com/apps).
-2. **OAuth & Permissions**
-   - Redirect URL: `https://api.butterbase.ai/v1/{APP_ID}/fn/slack_oauth_callback`
-   - Bot scopes: `app_mentions:read`, `chat:write`, `channels:read`, `groups:read`, `im:read`
-   - User scopes: `channels:history`, `groups:history`, `im:history`, `mpim:history`, `users:read`
-3. **Event Subscriptions** — enable, Request URL:
-   `https://api.butterbase.ai/v1/{APP_ID}/fn/slack_events`
+2. **OAuth redirect URL:** `https://api.butterbase.ai/v1/{APP_ID}/fn/slack_oauth_callback`
+3. **Bot scopes:** `app_mentions:read`, `chat:write`, `channels:read`, `groups:read`, `im:read`
+4. **User scopes:** `channels:history`, `groups:history`, `im:history`, `mpim:history`, `users:read`
+5. **Events URL:** `https://api.butterbase.ai/v1/{APP_ID}/fn/slack_events`
    - Subscribe to: `app_mention`, `message.channels`, `message.groups`, `message.im`
-4. Install the app to your test workspace.
+6. Install the app to your workspace.
 
 ---
 
 ## Butterbase deploy checklist
 
-1. Apply schema: [`butterbase/schema.json`](butterbase/schema.json) via `manage_schema`.
-2. Apply RLS policies: [`butterbase/rls.json`](butterbase/rls.json) via `manage_rls`.
-3. Deploy functions listed in [`butterbase/functions.json`](butterbase/functions.json) (each `.ts` in `butterbase/`).
-4. Set function **envVars** (see `.env.example` comments): Slack credentials, `SESSION_JWT_SECRET`, `INTERNAL_CRON_SECRET`, `FUNCTIONS_BASE_URL`, `FRONTEND_URL`, Neo4j, Nebius.
-5. Apply Neo4j schema:
-   ```bash
-   cat butterbase/graph-schema.cypher | neo4j-cli query --credential aura --rw
-   ```
-6. Build + deploy frontend: `npm run build` → upload `out/` to Butterbase static hosting.
+1. Apply schema: [`butterbase/schema.json`](butterbase/schema.json)
+2. Apply RLS: [`butterbase/rls.json`](butterbase/rls.json)
+3. Deploy functions: `npm run deploy:butterbase`
+4. Apply Neo4j schema: `npm run neo4j:schema`
+5. Deploy frontend: `npm run deploy:frontend`
+
+Set `INGEST_MAX_MESSAGES=500` to cap backfill for demo workspaces.
 
 ---
 
-## Hackathon demo script
+## Demo script
 
-1. Open `/signin` → **Connect Slack** (workspace + account).
-2. Land on `/onboarding` — watch channels fill and message counts increment.
-3. When complete, open `/dashboard` for the workspace digest.
+1. Open **https://aws-builder-hackathon.butterbase.dev/signin** → Connect Slack.
+2. Watch **/onboarding** — channels and message counts update live.
+3. When complete, open **/dashboard** for the workspace digest.
 4. In Slack, `@mention` the bot and ask about something from indexed channels.
-5. (Optional) Run RocketRide `pipelines/slack_ingest.pipe` locally for pipeline demos.
-
-Set `INGEST_MAX_MESSAGES=500` on functions to cap backfill for demo workspaces.
 
 ---
 
@@ -77,39 +216,29 @@ Set `INGEST_MAX_MESSAGES=500` on functions to cap backfill for demo workspaces.
 
 ```
 savoir/
-├── app/
-│   ├── page.tsx              # Landing
-│   ├── signin/               # Slack OAuth entry
-│   ├── onboarding/           # Ingestion progress
-│   └── dashboard/            # Summaries
-├── butterbase/
-│   ├── schema.json           # Postgres tables
-│   ├── rls.json              # RLS policy definitions
-│   ├── functions.json        # Function deploy manifest
-│   ├── shared/runtime.ts     # Shared function helpers
-│   ├── slack_oauth_*.ts      # OAuth handlers
-│   ├── ingest_next_chunk.ts  # Resumable ingestion worker
-│   ├── enrich_and_merge.ts   # LLM + Neo4j merge
-│   ├── slack_events.ts       # Events API + bot answers
-│   └── graph-schema.cypher   # Neo4j constraints
-├── lib/                      # Frontend session + API helpers
-├── pipelines/                # RocketRide (optional local dev)
-└── scripts/mcp/              # Agent MCP wrappers
+├── app/                    # Next.js pages (signin, onboarding, dashboard)
+├── butterbase/             # Serverless functions + Postgres schema + Neo4j Cypher
+├── lib/                    # Frontend session + API helpers
+├── pipelines/              # RocketRide pipeline definitions
+└── scripts/                # Deploy, Neo4j schema, RocketRide bridge
 ```
 
 ---
 
 ## Environment variables
 
-See [`.env.example`](.env.example). Key groups:
+See [`.env.example`](.env.example).
 
-- **Frontend:** `NEXT_PUBLIC_BUTTERBASE_*`
-- **Slack + auth (function env):** `SLACK_*`, `SESSION_JWT_SECRET`, `INTERNAL_CRON_SECRET`
-- **Neo4j:** `NEO4J_*`
-- **LLM:** `NEBIUS_*` (primary) or `OPENAI_API_KEY` (fallback)
+| Group | Variables |
+| ----- | --------- |
+| Frontend | `NEXT_PUBLIC_BUTTERBASE_*`, `NEXT_PUBLIC_APP_URL` |
+| Slack + auth | `SLACK_*`, `SESSION_JWT_SECRET`, `INTERNAL_CRON_SECRET`, `FRONTEND_URL` |
+| Neo4j | `NEO4J_*` |
+| Inference | `NEBIUS_*` (primary), `OPENAI_API_KEY` (fallback) |
+| RocketRide | `ROCKETRIDE_*`, `ROCKETRIDE_WEBHOOK_URL` |
 
 ---
 
 ## Agent tooling
 
-See [`AGENTS.md`](./AGENTS.md) for Neo4j + RocketRide MCP setup.
+See [`AGENTS.md`](./AGENTS.md) for Neo4j + RocketRide MCP setup in Cursor.

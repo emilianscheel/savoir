@@ -26,7 +26,7 @@ export function clearSession(): void {
   localStorage.removeItem(SESSION_KEY);
 }
 
-/** Parse #access_token=... from OAuth redirect hash */
+/** Parse #access_token=... from OAuth redirect hash (legacy). */
 export function parseOAuthHash(): SessionData | null {
   if (typeof window === "undefined") return null;
   const hash = window.location.hash.replace(/^#/, "");
@@ -40,11 +40,35 @@ export function parseOAuthHash(): SessionData | null {
   };
 }
 
-export function applySessionFromHash(): SessionData | null {
-  const parsed = parseOAuthHash();
+/** Parse ?access_token=... from OAuth redirect query (preferred). */
+export function parseOAuthQuery(): SessionData | null {
+  if (typeof window === "undefined") return null;
+  const params = new URLSearchParams(window.location.search);
+  const access_token = params.get("access_token");
+  if (!access_token) return null;
+  return {
+    access_token,
+    job_id: params.get("job_id") ?? undefined,
+  };
+}
+
+export function parseOAuthParams(): SessionData | null {
+  return parseOAuthQuery() || parseOAuthHash();
+}
+
+/** Persist session from OAuth redirect and strip tokens from the URL. */
+export function applySessionFromUrl(): SessionData | null {
+  const parsed = parseOAuthParams();
   if (parsed) {
     saveSession(parsed);
-    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("access_token");
+    url.searchParams.delete("job_id");
+    url.hash = "";
+    window.history.replaceState(null, "", url.pathname + url.search);
   }
   return parsed;
 }
+
+/** @deprecated Use applySessionFromUrl */
+export const applySessionFromHash = applySessionFromUrl;

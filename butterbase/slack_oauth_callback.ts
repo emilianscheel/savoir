@@ -174,7 +174,9 @@ export default async function handler(req: Request, ctx: FunctionContext): Promi
     slack_workspace_id: workspaceId,
   });
 
-  return redirect(
-    `${frontendUrl(ctx, "/onboarding")}#access_token=${encodeURIComponent(sessionToken)}&job_id=${jobId}`,
-  );
+  const qs = new URLSearchParams({
+    access_token: sessionToken,
+    ...(jobId ? { job_id: jobId } : {}),
+  });
+  return redirect(`${frontendUrl(ctx, "/onboarding")}?${qs.toString()}`);
 }

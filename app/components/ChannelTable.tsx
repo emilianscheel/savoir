@@ -6,6 +6,24 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+
+function progressStatusBadge(status: string) {
+  switch (status) {
+    case "fetching":
+      return <Badge>Indexing</Badge>;
+    case "done":
+      return (
+        <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+          Done
+        </Badge>
+      );
+    case "error":
+      return <Badge variant="destructive">Error</Badge>;
+    default:
+      return <Badge variant="outline">Waiting</Badge>;
+  }
+}
 
 type StatsRow = {
   channel_id: string;
@@ -66,9 +84,7 @@ export function ChannelTable(
         {props.channels.map((ch) => (
           <TableRow key={ch.channel_id}>
             <TableCell>#{ch.name || ch.channel_id}</TableCell>
-            <TableCell className="capitalize text-muted-foreground">
-              {ch.status}
-            </TableCell>
+            <TableCell>{progressStatusBadge(ch.status)}</TableCell>
             <TableCell className="text-right tabular-nums">{ch.fetched}</TableCell>
           </TableRow>
         ))}
