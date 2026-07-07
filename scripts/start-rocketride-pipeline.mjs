@@ -1,15 +1,11 @@
 #!/usr/bin/env node
 /**
- * Start slack_ingest.pipe on a RocketRide engine (local or cloud) and print the webhook URL
- * to set as ROCKETRIDE_WEBHOOK_URL on Butterbase functions.
- *
- * Requires: npm install rocketride (or npx rocketride)
- * Env: ROCKETRIDE_URI, ROCKETRIDE_AUTH (or ROCKETRIDE_APIKEY), ROCKETRIDE_OPENAI_KEY
+ * Start slack_ingest.pipe on hosted RocketRide and persist ROCKETRIDE_TOKEN to .env.local.
  */
-import { loadEnvLocal, projectRoot } from "./load-env.mjs";
+import { loadEnvLocal, projectRoot, upsertEnvLocal } from "./load-env.mjs";
 import path from "path";
 
-loadEnvLocal();
+loadEnvLocal({ overridePrefixes: ["ROCKETRIDE_"] });
 
 const auth = process.env.ROCKETRIDE_AUTH || process.env.ROCKETRIDE_APIKEY;
 const uri = process.env.ROCKETRIDE_URI || "https://api.rocketride.ai";
@@ -34,13 +30,21 @@ console.log(`Connecting to RocketRide at ${uri}...`);
 await client.connect();
 
 const result = await client.use({ filepath: pipePath });
+const token = result.token;
+upsertEnvLocal({ ROCKETRIDE_TOKEN: token });
+
+const bridgePort = process.env.ROCKETRIDE_BRIDGE_PORT || "8787";
+const bridgeUrl =
+  process.env.ROCKETRIDE_WEBHOOK_URL || `http://localhost:${bridgePort}/ingest`;
+
 console.log("\nPipeline started.");
-console.log("Token:", result.token);
-console.log("\nSet on Butterbase function env (and .env.local):");
-console.log(`ROCKETRIDE_WEBHOOK_URL=<your-engine-send-url-for-token-${result.token}>`);
-console.log(`ROCKETRIDE_AUTH=${auth.slice(0, 8)}...`);
-console.log("\nThen redeploy: npm run deploy:butterbase");
-console.log("\nPipeline flow:");
-console.log("  Slack → Butterbase enrich_and_merge → RocketRide webhook → LLM → merge callback → Neo4j");
+console.log("Token:", token);
+console.log("\nSaved ROCKETRIDE_TOKEN to .env.local");
+console.log("\nNext:");
+console.log("  1. npm run rocketride:bridge   (keep running)");
+console.log(`  2. Deploy bridge publicly, then set ROCKETRIDE_WEBHOOK_URL=<public-url>/ingest`);
+console.log("  3. npm run deploy:butterbase");
+console.log("\nLocal dev webhook (Butterbase cloud cannot reach this):");
+console.log(`  ROCKETRIDE_WEBHOOK_URL=${bridgeUrl}`);
 
 await client.disconnect();

@@ -238,12 +238,31 @@ async function enrichAndStore(
   msg: { ts: string; text?: string; user?: string; thread_ts?: string },
   channel: SlackChannel,
 ): Promise<void> {
+  if (ctx.env.ROCKETRIDE_WEBHOOK_URL) {
+    await fetch(`${requireEnv(ctx, "FUNCTIONS_BASE_URL")}/enrich_and_merge`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${requireEnv(ctx, "INTERNAL_CRON_SECRET")}`,
+      },
+      body: JSON.stringify({ slack_message_id: slackMessageId }),
+    });
+    return;
+  }
+
   const enrichment = await routeMessageEnrichment(ctx, {
     slack_message_id: slackMessageId,
     text: msg.text || "",
     channel_name: channel.name || channel.id,
   });
-  if (enrichment.deferred) return;
+  if (enrichment.deferred) {
+    await ctx.db.query(
+      `UPDATE slack_messages SET enrichment_status = 'processing'
+       WHERE slack_message_id = $1 AND enrichment_status = 'pending'`,
+      [slackMessageId],
+    );
+    return;
+  }
   await ctx.db.query(
     `UPDATE slack_messages SET summary = $2, topics = $3::jsonb, enrichment_status = 'done'
      WHERE slack_message_id = $1`,

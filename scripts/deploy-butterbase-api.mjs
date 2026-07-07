@@ -71,6 +71,7 @@ const envVars = {
   SLACK_TEAM_ID: process.env.SLACK_TEAM_ID || "",
   ROCKETRIDE_WEBHOOK_URL: process.env.ROCKETRIDE_WEBHOOK_URL || "",
   ROCKETRIDE_AUTH: process.env.ROCKETRIDE_AUTH || "",
+  ROCKETRIDE_BRIDGE_SECRET: process.env.ROCKETRIDE_BRIDGE_SECRET || process.env.ROCKETRIDE_AUTH || "",
 };
 
 function memoryLimitMb(name) {

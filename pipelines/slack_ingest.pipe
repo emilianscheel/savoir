@@ -1,20 +1,18 @@
 {
-    "name": "slack_ingest",
-    "description": "Cloud RocketRide enrichment pipeline. Butterbase POSTs Slack messages to the webhook source; LLM enriches; merge callback lands in Neo4j via enrich_and_merge.",
-    "source": "source_1",
-    "nodes": [
+    "components": [
         {
             "id": "source_1",
-            "provider": "webhook"
+            "provider": "webhook",
+            "config": {}
         },
         {
             "id": "extract_1",
             "provider": "extract_data",
             "config": {
                 "instructions": [
-                    "From the Slack message JSON, extract summary and 0-5 topic tags.",
-                    "Input fields: slack_message_id, text, channel_name, merge_callback_url.",
-                    "Output JSON: {\"slack_message_id\":\"...\",\"summary\":\"...\",\"topics\":[\"...\"],\"merge_only\":true}"
+                    "The input is JSON for a Slack message with slack_message_id, text, and channel_name.",
+                    "Produce a concise summary (1-2 sentences) and 0-5 lowercase topic tags.",
+                    "Output JSON only: {\"slack_message_id\":\"...\",\"summary\":\"...\",\"topics\":[\"tag1\",\"tag2\"]}"
                 ],
                 "parameters": {}
             },
@@ -41,6 +39,23 @@
                     "from": "extract_1"
                 }
             ]
+        },
+        {
+            "id": "target_1",
+            "provider": "response_text",
+            "config": {},
+            "input": [
+                {
+                    "lane": "text",
+                    "from": "extract_1"
+                }
+            ]
         }
-    ]
+    ],
+    "source": "source_1",
+    "name": "slack_ingest",
+    "description": "Slack enrichment: webhook → extract_data → LLM → response to bridge.",
+    "project_id": "7c4e9a2b-1d3f-4a8e-9b6c-2f5d8e1a0c3b",
+    "viewport": { "x": 0, "y": 0, "zoom": 1 },
+    "version": 1
 }

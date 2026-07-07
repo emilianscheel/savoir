@@ -1,0 +1,32 @@
+# Render Blueprint — RocketRide bridge (public HTTP endpoint for Butterbase)
+# Apply: connect repo in Render Dashboard → New Blueprint → use this file
+# Set secret env vars in Dashboard after first deploy (never commit real values).
+
+services:
+  - type: web
+    name: savoir-rocketride-bridge
+    runtime: node
+    rootDir: savoir
+    plan: free
+    buildCommand: npm install
+    startCommand: node scripts/rocketride-bridge.mjs
+    healthCheckPath: /health
+    envVars:
+      - key: ROCKETRIDE_URI
+        value: https://api.rocketride.ai
+      - key: ROCKETRIDE_AUTH
+        sync: false
+      - key: ROCKETRIDE_TOKEN
+        sync: false
+      - key: ROCKETRIDE_BRIDGE_SECRET
+        sync: false
+      - key: INTERNAL_CRON_SECRET
+        sync: false
+      - key: NEBIUS_API_KEY
+        sync: false
+      - key: NEBIUS_BASE_URL
+        value: https://api.tokenfactory.us-central1.nebius.com/v1
+      - key: NEBIUS_MODEL
+        value: moonshotai/Kimi-K2.7-Code
+      - key: FUNCTIONS_BASE_URL
+        value: https://api.butterbase.ai/v1/app_y6dtsszb47za/fn

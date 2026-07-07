@@ -252,10 +252,9 @@ export async function routeMessageEnrichment(
 ): Promise<RoutedEnrichment> {
   const webhook = ctx.env.ROCKETRIDE_WEBHOOK_URL;
   if (webhook) {
+    const bridgeSecret = ctx.env.ROCKETRIDE_BRIDGE_SECRET || ctx.env.ROCKETRIDE_AUTH;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (ctx.env.ROCKETRIDE_AUTH) {
-      headers.Authorization = `Bearer ${ctx.env.ROCKETRIDE_AUTH}`;
-    }
+    if (bridgeSecret) headers.Authorization = `Bearer ${bridgeSecret}`;
     const res = await fetch(webhook, {
       method: "POST",
       headers,

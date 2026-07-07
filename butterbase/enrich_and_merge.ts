@@ -67,7 +67,14 @@ async function processBatch(
     }
 
     const enrichment = await routeMessageEnrichment(ctx, row);
-    if (enrichment.deferred) continue;
+    if (enrichment.deferred) {
+      await ctx.db.query(
+        `UPDATE slack_messages SET enrichment_status = 'processing'
+         WHERE id = $1 AND enrichment_status = 'pending'`,
+        [row.id],
+      );
+      continue;
+    }
     processed.push(await processRow(ctx, row, enrichment));
   }
   return processed;
