@@ -8,6 +8,7 @@ import {
 const BOT_SCOPES = [
   "app_mentions:read",
   "chat:write",
+  "chat:write.public",
   "channels:read",
 ].join(",");
 
@@ -17,6 +18,7 @@ const USER_SCOPES = ["channels:history", "channels:read", "users:read"].join(","
 const BOT_SCOPES_FULL = [
   "app_mentions:read",
   "chat:write",
+  "chat:write.public",
   "channels:read",
   "groups:read",
   "im:read",

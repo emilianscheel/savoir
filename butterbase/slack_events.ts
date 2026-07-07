@@ -48,17 +48,14 @@ export default async function handler(req: Request, ctx: FunctionContext): Promi
 
   if (event.bot_id) return json({ ok: true, ignored: "bot_message" });
 
+  const subtype = (event as { subtype?: string }).subtype;
+  if (subtype && subtype !== "file_share") {
+    return json({ ok: true, ignored: subtype });
+  }
+
   if (event.type === "app_mention") {
-    ctx.waitUntil(
-      fetch(`${requireEnv(ctx, "FUNCTIONS_BASE_URL")}/slack_bot_answer`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${requireEnv(ctx, "INTERNAL_CRON_SECRET")}`,
-        },
-        body: JSON.stringify({ team_id: payload.team_id, event }),
-      }),
-    );
+    const contextTeamId = (event as { team?: string }).team;
+    ctx.waitUntil(dispatchBotAnswer(ctx, payload.team_id, contextTeamId, event));
     return json({ ok: true });
   }
 
@@ -68,10 +65,48 @@ export default async function handler(req: Request, ctx: FunctionContext): Promi
     event.channel &&
     event.ts
   ) {
-    ctx.waitUntil(handleMessageEvent(ctx, payload.team_id, event));
+    const isDm = event.channel.startsWith("D");
+    const isThreadReply = !!event.thread_ts && event.thread_ts !== event.ts;
+    const isTopLevelMention = /<@[A-Z0-9]+>/.test(event.text) && !isThreadReply;
+
+    if ((isDm || isThreadReply) && !isTopLevelMention) {
+      const contextTeamId = (event as { team?: string }).team;
+      ctx.waitUntil(dispatchBotAnswer(ctx, payload.team_id, contextTeamId, event));
+    }
+
+    if (!isTopLevelMention) {
+      ctx.waitUntil(handleMessageEvent(ctx, payload.team_id, event));
+    }
   }
 
   return json({ ok: true });
+}
+
+async function dispatchBotAnswer(
+  ctx: FunctionContext,
+  teamId: string,
+  contextTeamId: string | undefined,
+  event: {
+    text?: string;
+    user?: string;
+    channel?: string;
+    ts?: string;
+    thread_ts?: string;
+  },
+): Promise<void> {
+  await fetch(`${requireEnv(ctx, "FUNCTIONS_BASE_URL")}/slack_bot_answer`, {
+    method: "POST",
+    signal: AbortSignal.timeout(15_000),
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${requireEnv(ctx, "INTERNAL_CRON_SECRET")}`,
+    },
+    body: JSON.stringify({
+      team_id: teamId,
+      context_team_id: contextTeamId,
+      event,
+    }),
+  }).catch(() => undefined);
 }
 
 async function handleMessageEvent(
@@ -116,6 +151,7 @@ async function handleMessageEvent(
 
   await fetch(`${requireEnv(ctx, "FUNCTIONS_BASE_URL")}/enrich_and_merge`, {
     method: "POST",
+    signal: AbortSignal.timeout(10_000),
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${requireEnv(ctx, "INTERNAL_CRON_SECRET")}`,

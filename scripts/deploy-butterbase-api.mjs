@@ -8,7 +8,9 @@ import { loadEnvLocal } from "./load-env.mjs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
 
-loadEnvLocal();
+loadEnvLocal({
+  overridePrefixes: ["SLACK_", "INTERNAL_", "SESSION_", "NEBIUS_", "NEO4J_", "ROCKETRIDE_"],
+});
 
 const appId = process.env.BUTTERBASE_APP_ID || process.env.NEXT_PUBLIC_BUTTERBASE_APP_ID || "app_y6dtsszb47za";
 const token = process.env.BUTTERBASE_API_KEY;
@@ -84,7 +86,7 @@ function timeoutMs(name) {
   if (name === "slack_bot_answer" || name === "enrich_and_merge" || name === "ingest_next_chunk") {
     return 120_000;
   }
-  if (name === "slack_events") return 10_000;
+  if (name === "slack_events") return 60_000;
   return 30_000;
 }
 

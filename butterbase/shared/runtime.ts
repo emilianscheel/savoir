@@ -255,17 +255,22 @@ export async function routeMessageEnrichment(
     const bridgeSecret = ctx.env.ROCKETRIDE_BRIDGE_SECRET || ctx.env.ROCKETRIDE_AUTH;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (bridgeSecret) headers.Authorization = `Bearer ${bridgeSecret}`;
-    const res = await fetch(webhook, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        slack_message_id: row.slack_message_id,
-        text: row.text,
-        channel_name: row.channel_name,
-        merge_callback_url: `${requireEnv(ctx, "FUNCTIONS_BASE_URL")}/enrich_and_merge`,
-      }),
-    });
-    if (res.ok) return { summary: "", topics: [], deferred: true };
+    try {
+      const res = await fetch(webhook, {
+        method: "POST",
+        headers,
+        signal: AbortSignal.timeout(5_000),
+        body: JSON.stringify({
+          slack_message_id: row.slack_message_id,
+          text: row.text,
+          channel_name: row.channel_name,
+          merge_callback_url: `${requireEnv(ctx, "FUNCTIONS_BASE_URL")}/enrich_and_merge`,
+        }),
+      });
+      if (res.ok) return { summary: "", topics: [], deferred: true };
+    } catch {
+      /* bridge unreachable — fall through to inline Nebius enrich */
+    }
   }
   return enrichMessage(ctx, (row.text as string) || "");
 }
@@ -274,6 +279,7 @@ export async function chatCompletion(
   ctx: FunctionContext,
   system: string,
   user: string,
+  opts?: { timeoutMs?: number; maxTokens?: number },
 ): Promise<string> {
   const apiKey = ctx.env.NEBIUS_API_KEY || ctx.env.OPENAI_API_KEY;
   const baseUrl = (ctx.env.NEBIUS_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "");
@@ -289,10 +295,11 @@ export async function chatCompletion(
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    signal: AbortSignal.timeout(55_000),
+    signal: AbortSignal.timeout(opts?.timeoutMs ?? 55_000),
     body: JSON.stringify({
       model,
       temperature: 0.3,
+      max_tokens: opts?.maxTokens ?? 800,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -433,7 +440,7 @@ export async function queryNeo4jContext(
   ctx: FunctionContext,
   teamId: string,
   question: string,
-  limit = 50,
+  limit = 12,
 ): Promise<string> {
   const keywords = question
     .toLowerCase()
@@ -467,7 +474,7 @@ export async function queryNeo4jContext(
       ORDER BY m.ts DESC
       LIMIT $limit
       `,
-      { teamId, limit: 20 },
+      { teamId, limit: Math.min(limit, 10) },
     );
     return formatContext(fallback);
   }
@@ -476,12 +483,14 @@ export async function queryNeo4jContext(
 }
 
 function formatContext(rows: Record<string, unknown>[]): string {
+  const maxLen = 320;
   return rows
     .map((r) => {
       const channel = r.channel ?? r["0"] ?? "unknown";
       const ts = r.ts ?? r["1"] ?? "";
       const author = r.author ?? r["2"] ?? "";
-      const content = r.content ?? r["3"] ?? "";
+      let content = String(r.content ?? r["3"] ?? "");
+      if (content.length > maxLen) content = `${content.slice(0, maxLen)}…`;
       return `[#${channel} | ${ts} | ${author}] ${content}`;
     })
     .join("\n");
