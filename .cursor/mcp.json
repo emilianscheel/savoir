@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "neo4j": {
+      "command": "bash",
+      "args": ["scripts/mcp/neo4j-mcp.sh"]
+    },
+    "rocketride": {
+      "command": "bash",
+      "args": ["scripts/mcp/rocketride-mcp.sh"]
+    }
+  }
+}

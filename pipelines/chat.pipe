@@ -1,0 +1,18 @@
+{
+  "name": "chat",
+  "description": "Minimal Chat -> LLM pipeline. A webhook source feeds questions to an OpenAI LLM node; the response is returned. Starting point for savoir AI features.",
+  "nodes": [
+    { "id": "source_1", "provider": "webhook" },
+    {
+      "id": "llm_1",
+      "provider": "llm_openai",
+      "config": { "profile": "openai-4o-mini", "apikey": "${OPENAI_API_KEY}" },
+      "input": [{ "lane": "questions", "from": "source_1" }]
+    },
+    {
+      "id": "target_1",
+      "provider": "response",
+      "input": [{ "lane": "answers", "from": "llm_1" }]
+    }
+  ]
+}
