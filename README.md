@@ -7,23 +7,6 @@ Turn Slack history into a searchable knowledge graph and answer questions in Sla
 **Live app:** https://aws-builder-hackathon.butterbase.dev  
 **Sign in:** https://aws-builder-hackathon.butterbase.dev/signin
 
-*Last updated: July 7, 2026 at 4:28 PM PT*
-
----
-
-## What's live in production
-
-| Layer | Status |
-| ----- | ------ |
-| Slack OAuth + ingestion | ✅ Active |
-| Postgres message store | ✅ Active |
-| **Nebius Kimi enrichment** | ✅ **Active (default path)** |
-| Neo4j graph merge | ✅ Active |
-| Slack bot (`@mention` → Kimi) | ✅ Active |
-| **RocketRide enrichment** | ⚙️ **Wired in code, not running live** |
-
-Production enrichment uses **inline Nebius Kimi** inside Butterbase functions. RocketRide is integrated as an optional swap-in path when a live bridge URL is configured — it is **not** processing messages in the deployed app today.
-
 ---
 
 ## Tools we used
@@ -33,8 +16,8 @@ Production enrichment uses **inline Nebius Kimi** inside Butterbase functions. R
 | **[Slack](https://api.slack.com/)** | OAuth, message history, Events API, `@mention` bot replies |
 | **[Butterbase](https://butterbase.ai/)** | Serverless functions, Postgres database, static frontend hosting |
 | **[Neo4j Aura](https://neo4j.com/cloud/aura/)** | Knowledge graph — teams, people, messages, topics |
-| **[Nebius Token Factory](https://nebius.com/)** | **Active** — primary LLM for enrichment + bot (Kimi K2.7 Code) |
-| **[RocketRide](https://rocketride.ai/)** | **Optional** — enrichment pipeline wired in code; not live until bridge + webhook are running |
+| **[Nebius Token Factory](https://nebius.com/)** | LLM inference for enrichment + bot (Kimi K2.7 Code, OpenAI-compatible API) |
+| **[RocketRide](https://rocketride.ai/)** | Cloud enrichment pipeline — `extract_data` + LLM via `slack_ingest.pipe` |
 | **[OpenAI](https://platform.openai.com/)** | Fallback LLM + RocketRide pipeline profile (`gpt-4o-mini`) |
 | **Next.js** | Static frontend (`/signin`, `/onboarding`, `/dashboard`) |
 | **Postgres** | Raw Slack messages, ingestion jobs, tokens (via Butterbase) |
@@ -66,12 +49,13 @@ This is how data flows through Savoir from sign-in to bot answers.
 │  3. ENRICH (per message)                                                │
 │     enrich_and_merge  →  routeMessageEnrichment                         │
 │                                                                         │
-│     ✅ LIVE TODAY — Path A (default):                                   │
-│       Nebius Kimi inline → summary + topic tags                         │
+│     Path A — Nebius Kimi (inline):                                      │
+│       Direct LLM call → summary + topic tags                            │
 │                                                                         │
-│     ⚙️ OPTIONAL — Path B (requires live ROCKETRIDE_WEBHOOK_URL):          │
-│       POST bridge → slack_ingest.pipe → callback enrich_and_merge       │
-│       If bridge unreachable → falls back to Path A automatically        │
+│     Path B — RocketRide (when ROCKETRIDE_WEBHOOK_URL is set):             │
+│       POST bridge → slack_ingest.pipe (extract_data + LLM)              │
+│       → callback enrich_and_merge (merge_only) → Neo4j                    │
+│       Falls back to Path A if the bridge is unavailable                 │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -107,7 +91,7 @@ This is how data flows through Savoir from sign-in to bot answers.
 
 1. **Connect** — User authorizes Slack once. We store workspace + user tokens and start a session.
 2. **Backfill** — `ingest_next_chunk` pulls channel history in chunks until the job is complete.
-3. **Enrich** — Each message gets a summary and topic tags via **Nebius Kimi** (production default). RocketRide can replace this step when a public bridge is running; otherwise the code falls back to Kimi automatically.
+3. **Enrich** — Each message gets a summary and topic tags. `routeMessageEnrichment` sends work to **RocketRide** (`slack_ingest.pipe`) when `ROCKETRIDE_WEBHOOK_URL` is configured, or enriches inline with **Nebius Kimi**.
 4. **Graph** — Enriched messages are merged into **Neo4j** (people, teams, topics, message nodes).
 5. **Live** — New Slack messages hit `slack_events` and go through the same enrich → graph path.
 6. **Dashboard** — A precomputed digest and per-channel stats appear on `/dashboard`.
@@ -157,31 +141,33 @@ npm run neo4j:schema
 
 ---
 
-## RocketRide (optional — not live in production)
+## RocketRide in the pipeline
 
-RocketRide is **fully wired** in the codebase (`routeMessageEnrichment`, bridge script, `slack_ingest.pipe`) but **not actively processing** deployed traffic unless all of the following are true:
+RocketRide is integrated into the enrichment step via `routeMessageEnrichment` in `butterbase/shared/runtime.ts`.
 
-1. `ROCKETRIDE_WEBHOOK_URL` points to a **reachable public** bridge (not a stale local/ngrok URL)
-2. The bridge is running (`npm run rocketride:bridge` or deploy via `render.yaml`)
-3. `slack_ingest.pipe` is started on RocketRide (`npm run rocketride:start`)
-4. Functions are redeployed with `npm run deploy:butterbase`
+**How it works:**
 
-**Today:** enrichment runs on **Nebius Kimi inline**. If `ROCKETRIDE_WEBHOOK_URL` is set but the bridge is down, functions time out after 5s and **still use Kimi**.
-
-When the bridge is live, the flow is:
+1. `ingest_next_chunk` or `slack_events` stores a message in Postgres and calls `enrich_and_merge`.
+2. `enrich_and_merge` calls `routeMessageEnrichment`.
+3. When `ROCKETRIDE_WEBHOOK_URL` is set, Butterbase **POSTs** the message to the RocketRide bridge (`scripts/rocketride-bridge.mjs`).
+4. The bridge runs **`pipelines/slack_ingest.pipe`** on RocketRide (`extract_data` → LLM).
+5. The bridge calls back **`enrich_and_merge`** with `merge_only: true` (summary + topics).
+6. `enrich_and_merge` merges the result into **Neo4j** via `mergeMessageToNeo4j`.
 
 ```
 Butterbase enrich_and_merge
-  → POST ROCKETRIDE_WEBHOOK_URL (bridge /ingest)
-  → RocketRide slack_ingest.pipe (extract_data → LLM)
-  → callback enrich_and_merge (merge_only) → Neo4j
+  → POST ROCKETRIDE_WEBHOOK_URL/ingest
+  → RocketRide slack_ingest.pipe
+  → callback enrich_and_merge (merge_only)
+  → Neo4j
 ```
 
+**Run locally:**
+
 ```bash
-npm run rocketride:start     # start slack_ingest.pipe, save ROCKETRIDE_TOKEN
-npm run rocketride:bridge    # local HTTP bridge (or deploy render.yaml)
-# set public ROCKETRIDE_WEBHOOK_URL, then:
-npm run deploy:butterbase
+npm run rocketride:start     # start slack_ingest.pipe on RocketRide
+npm run rocketride:bridge    # HTTP bridge (or deploy via render.yaml)
+npm run deploy:butterbase    # deploy functions with ROCKETRIDE_WEBHOOK_URL
 ```
 
 Pipeline files: `pipelines/slack_ingest.pipe`, `pipelines/chat.pipe`
@@ -262,8 +248,8 @@ See [`.env.example`](.env.example).
 | Frontend | `NEXT_PUBLIC_BUTTERBASE_*`, `NEXT_PUBLIC_APP_URL` |
 | Slack + auth | `SLACK_*`, `SESSION_JWT_SECRET`, `INTERNAL_CRON_SECRET`, `FRONTEND_URL` |
 | Neo4j | `NEO4J_*` |
-| Inference | `NEBIUS_*` (**active in production**), `OPENAI_API_KEY` (fallback) |
-| RocketRide | `ROCKETRIDE_*`, `ROCKETRIDE_WEBHOOK_URL` (optional; unset or unreachable → Kimi inline) |
+| Inference | `NEBIUS_*`, `OPENAI_API_KEY` |
+| RocketRide | `ROCKETRIDE_*`, `ROCKETRIDE_WEBHOOK_URL`, `ROCKETRIDE_BRIDGE_SECRET` |
 
 ---
 
