@@ -1,0 +1,66 @@
+{
+  "functions": [
+    {
+      "name": "slack_oauth_start",
+      "file": "slack_oauth_start.ts",
+      "trigger": { "type": "http", "config": { "method": "GET", "auth": "none" } }
+    },
+    {
+      "name": "slack_oauth_callback",
+      "file": "slack_oauth_callback.ts",
+      "trigger": { "type": "http", "config": { "method": "GET", "auth": "none" } }
+    },
+    {
+      "name": "get_ingestion_status",
+      "file": "get_ingestion_status.ts",
+      "trigger": { "type": "http", "config": { "method": "GET", "auth": "none" } }
+    },
+    {
+      "name": "get_dashboard_data",
+      "file": "get_dashboard_data.ts",
+      "trigger": { "type": "http", "config": { "method": "GET", "auth": "none" } }
+    },
+    {
+      "name": "ingest_next_chunk",
+      "file": "ingest_next_chunk.ts",
+      "triggers": [
+        { "type": "http", "config": { "method": "POST", "auth": "none" } },
+        { "type": "cron", "config": { "schedule": "* * * * *", "timezone": "UTC" } }
+      ]
+    },
+    {
+      "name": "enrich_and_merge",
+      "file": "enrich_and_merge.ts",
+      "trigger": { "type": "http", "config": { "method": "POST", "auth": "none" } }
+    },
+    {
+      "name": "slack_events",
+      "file": "slack_events.ts",
+      "trigger": { "type": "http", "config": { "method": "POST", "auth": "none" } }
+    },
+    {
+      "name": "generate_workspace_summary",
+      "file": "generate_workspace_summary.ts",
+      "trigger": { "type": "http", "config": { "method": "POST", "auth": "none" } }
+    }
+  ],
+  "envVars": [
+    "SLACK_CLIENT_ID",
+    "SLACK_CLIENT_SECRET",
+    "SLACK_SIGNING_SECRET",
+    "SLACK_REDIRECT_URI",
+    "SESSION_JWT_SECRET",
+    "INTERNAL_CRON_SECRET",
+    "FUNCTIONS_BASE_URL",
+    "FRONTEND_URL",
+    "NEO4J_URI",
+    "NEO4J_USERNAME",
+    "NEO4J_PASSWORD",
+    "NEO4J_DATABASE",
+    "NEBIUS_API_KEY",
+    "NEBIUS_BASE_URL",
+    "NEBIUS_MODEL",
+    "OPENAI_API_KEY",
+    "INGEST_MAX_MESSAGES"
+  ]
+}

@@ -7,6 +7,10 @@
     "rocketride": {
       "command": "bash",
       "args": ["scripts/mcp/rocketride-mcp.sh"]
+    },
+    "nebius": {
+      "command": "bash",
+      "args": ["scripts/mcp/nebius-mcp.sh"]
     }
   }
 }

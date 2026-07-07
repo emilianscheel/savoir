@@ -19,7 +19,9 @@
 // NODE TYPES — uniqueness constraints (each defines the label's identity key)
 // ---------------------------------------------------------------------------
 CREATE CONSTRAINT person_email     IF NOT EXISTS FOR (n:Person)       REQUIRE n.email IS UNIQUE;
+CREATE CONSTRAINT person_slack_user_id IF NOT EXISTS FOR (n:Person)   REQUIRE n.slack_user_id IS UNIQUE;
 CREATE CONSTRAINT team_name        IF NOT EXISTS FOR (n:Team)         REQUIRE n.name  IS UNIQUE;
+CREATE CONSTRAINT team_slack_team_id IF NOT EXISTS FOR (n:Team)       REQUIRE n.slack_team_id IS UNIQUE;
 CREATE CONSTRAINT project_key      IF NOT EXISTS FOR (n:Project)      REQUIRE n.key   IS UNIQUE;
 CREATE CONSTRAINT repo_name        IF NOT EXISTS FOR (n:Repo)         REQUIRE n.name  IS UNIQUE;
 CREATE CONSTRAINT service_name     IF NOT EXISTS FOR (n:Service)      REQUIRE n.name  IS UNIQUE;
@@ -64,6 +66,7 @@ CREATE CONSTRAINT incident_id      IF NOT EXISTS FOR (n:Incident)     REQUIRE n.
 //     (Doc)-[:DOCUMENTS]->(Service)
 //     (Person)-[:POSTED {at}]->(SlackMessage)
 //     (SlackMessage)-[:MENTIONS]->(Topic)
+//     (SlackMessage)-[:REPLIES_TO]->(SlackMessage)
 //     (SlackMessage)-[:REFERENCES]->(Incident)
 //
 //   Reliability
@@ -88,6 +91,9 @@ CREATE INDEX rel_posted_at        IF NOT EXISTS FOR ()-[r:POSTED]-()     ON (r.a
 // SECONDARY NODE INDEXES — non-key properties used for lookups/search
 // ---------------------------------------------------------------------------
 CREATE INDEX person_name  IF NOT EXISTS FOR (n:Person)   ON (n.name);
+CREATE INDEX person_slack IF NOT EXISTS FOR (n:Person)   ON (n.slack_user_id);
+CREATE INDEX team_slack   IF NOT EXISTS FOR (n:Team)     ON (n.slack_team_id);
+CREATE INDEX slackmsg_channel IF NOT EXISTS FOR (n:SlackMessage) ON (n.channel_id);
 CREATE INDEX pr_state     IF NOT EXISTS FOR (n:PR)       ON (n.state);
 CREATE INDEX issue_state  IF NOT EXISTS FOR (n:Issue)    ON (n.state);
 CREATE INDEX incident_sev IF NOT EXISTS FOR (n:Incident) ON (n.severity);

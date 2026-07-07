@@ -1,0 +1,40 @@
+{
+  "description": "Apply via Butterbase manage_rls after schema apply. slack_workspaces and slack_tokens have no client SELECT policies (service functions only).",
+  "policies": [
+    {
+      "action": "create_user_isolation",
+      "table_name": "slack_users",
+      "user_column": "butterbase_auth_user_id"
+    },
+    {
+      "action": "create_user_isolation",
+      "table_name": "slack_messages",
+      "user_column": "slack_user_id",
+      "note": "Use subquery policy instead — slack_user_id is not auth id. Apply custom policy below."
+    },
+    {
+      "action": "create_policy",
+      "table_name": "slack_messages",
+      "policy_name": "slack_messages_owner_select",
+      "command": "SELECT",
+      "role": "user",
+      "using_expression": "slack_user_id IN (SELECT id FROM slack_users WHERE butterbase_auth_user_id = current_user_id()::uuid)"
+    },
+    {
+      "action": "create_policy",
+      "table_name": "ingestion_jobs",
+      "policy_name": "ingestion_jobs_owner_select",
+      "command": "SELECT",
+      "role": "user",
+      "using_expression": "slack_user_id IN (SELECT id FROM slack_users WHERE butterbase_auth_user_id = current_user_id()::uuid)"
+    },
+    {
+      "action": "create_policy",
+      "table_name": "workspace_summaries",
+      "policy_name": "workspace_summaries_owner_select",
+      "command": "SELECT",
+      "role": "user",
+      "using_expression": "slack_user_id IN (SELECT id FROM slack_users WHERE butterbase_auth_user_id = current_user_id()::uuid)"
+    }
+  ]
+}

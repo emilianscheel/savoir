@@ -13,33 +13,37 @@ No secrets are committed.
 
 ## One-time setup after cloning
 
-1. `cp .env.example .env.local` and fill in the values (ask the team for the
-   Neo4j Aura password, RocketRide API key, and OpenAI key — they're in the
-   shared password manager, not in git).
-2. Install [`uv`](https://docs.astral.sh/uv/) if you don't have it
-   (`brew install uv`). The wrappers use `uvx` to run the MCP servers with no
-   manual pip install.
-3. Reload the editor (or toggle the servers on in Cursor → Settings → MCP).
+1. `cp .env.example .env.local` and fill in the values.
+2. Install [`uv`](https://docs.astral.sh/uv/) (`brew install uv`).
+3. Reload the editor (or toggle MCP servers in Cursor → Settings → MCP).
 
-That's it — `neo4j` and `rocketride` then appear as MCP servers to your agent.
+## Slack platform (Butterbase functions)
 
-## What each server gives your agent
+| Function | Role |
+| -------- | ---- |
+| `slack_oauth_start` | Redirect to Slack OAuth (bot + user scopes) |
+| `slack_oauth_callback` | Store tokens, start ingestion, mint session JWT |
+| `ingest_next_chunk` | Resumable history fetch (cron + self-chain) |
+| `get_ingestion_status` | Poll job progress for `/onboarding` |
+| `enrich_and_merge` | Nebius summary/topics → Neo4j MERGE |
+| `slack_events` | Events API + `@bot` answers from Neo4j |
+| `generate_workspace_summary` | Precomputed dashboard digest |
+| `get_dashboard_data` | Authenticated dashboard API |
 
-- **neo4j** — read-only access to the shared Aura memory graph via `get-schema`
-  and `read-cypher`. Entities live as `(:Entity {name, type, observations,
-  created_at})` nodes. To write memory, use the CLI instead:
-  `neo4j-cli query --credential aura --rw '<cypher>'` (writes are intentionally
-  blocked over MCP; set `NEO4J_READ_ONLY=false` in `.env.local` only if you
-  really need agent writes).
-- **rocketride** — exposes every *running* RocketRide pipeline as a callable
-  tool. Pipelines are `.pipe` JSON files in `pipelines/`. This server only sees
-  pipelines once the RocketRide engine is running and a pipeline is started:
-  install the RocketRide IDE extension (Open VSX), deploy a local engine, then
-  Run a pipeline (or start it via the SDK/CLI). Set `ROCKETRIDE_AUTH` in
-  `.env.local` to your engine API key.
+Shared logic: `butterbase/shared/runtime.ts` (Slack API, JWT session, Neo4j HTTP, Nebius).
+
+**Production ingestion does not require RocketRide.** The optional `pipelines/slack_ingest.pipe` mirrors enrichment for local engine demos.
+
+Neo4j graph model: `Team`, `Person`, `SlackMessage`, `Topic` — see `butterbase/graph-schema.cypher`.
+
+Apply graph schema: `cat butterbase/graph-schema.cypher | neo4j-cli query --credential aura --rw`
+
+## MCP servers
+
+- **neo4j** — read-only Aura access via `neo4j-mcp.sh`. Writes go through `neo4j-cli --rw` or Butterbase `enrich_and_merge`.
+- **rocketride** — exposes running pipelines as tools via `rocketride-mcp.sh`.
 
 ## Pipelines
 
-`pipelines/chat.pipe` is a starter `Chat -> LLM -> response` pipeline. Edit it
-visually with the RocketRide extension or by hand (it's plain JSON). Add new
-`.pipe` files here; they become MCP tools automatically when started.
+- `pipelines/chat.pipe` — starter chat pipeline
+- `pipelines/slack_ingest.pipe` — optional local enrichment (not production path)

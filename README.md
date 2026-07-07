@@ -1,43 +1,23 @@
 # savoir
 
-Account Console for **HackwithBay 3.0 / AWS Builder Hackathon**.
+**Slack knowledge platform** for **HackwithBay 3.0 / AWS Builder Hackathon**.
 
-A small [Next.js](https://nextjs.org) app backed by [Butterbase](https://butterbase.ai)
-(managed Postgres + serverless functions + static hosting), shipped with
-**MCP tooling** (Neo4j memory graph + RocketRide AI pipelines) so any teammate's
-coding agent — Cursor, Claude, etc. — is productive right after cloning.
+Next.js static frontend on [Butterbase](https://butterbase.ai), Slack OAuth ingestion into Postgres + Neo4j, and a Slack bot that answers from the graph via Nebius (OpenAI-compatible LLM).
 
 ---
 
-## What it does
+## Features
 
-- **Account lookup** — enter an email, and a Butterbase serverless function
-  (`butterbase/lookup_account.ts`) returns that account's `plan` and `status`.
-- **Recent accounts** — the UI lists the 20 most recent rows from the `accounts`
-  table via Butterbase's auto-generated data API (no SQL in the frontend).
+| Route | Purpose |
+| ----- | ------- |
+| `/` | Landing page |
+| `/signin` | Connect Slack — workspace install + user authorization |
+| `/onboarding` | Live ingestion progress (channels + message counts) |
+| `/dashboard` | Workspace digest + per-channel stats |
 
-The data model lives in `butterbase/schema.json` (an `accounts` table:
-`id`, `email`, `plan`, `status`, `created_at`).
-
-## Tech stack
-
-| Layer            | Tech                                                        |
-| ---------------- | ---------------------------------------------------------- |
-| Frontend         | Next.js 16 · React 19 · TypeScript · Tailwind CSS v4        |
-| Backend / DB     | Butterbase (`@butterbase/sdk`) — Postgres-backed BaaS      |
-| Agent memory     | Neo4j Aura (graph DB) via the `neo4j` MCP server           |
-| AI pipelines     | RocketRide (`.pipe` files) via the `rocketride` MCP server |
-| Deployment       | Static export (`next build` → `out/`) on Butterbase hosting |
+**Backend flow:** OAuth → chunked Slack history fetch → Nebius enrichment → Neo4j merge → Slack Events for new messages → `@bot` answers from Neo4j context.
 
 ---
-
-## Prerequisites
-
-- **Node.js 20+** and npm
-- **[uv](https://docs.astral.sh/uv/)** (`brew install uv`) — the MCP wrappers use
-  `uvx` to run the Python MCP servers with no manual install
-- Access to the shared secrets (Butterbase app ID, Neo4j Aura password, RocketRide
-  key, OpenAI key) — they live in the team password manager, **not** in git
 
 ## Quick start
 
@@ -45,42 +25,51 @@ The data model lives in `butterbase/schema.json` (an `accounts` table:
 git clone https://github.com/emilianscheel/savoir.git
 cd savoir
 npm install
-cp .env.example .env.local   # then fill in the real values
+cp .env.example .env.local   # fill in values
 npm run dev                  # http://localhost:3000
 ```
 
-Build the static site for Butterbase hosting:
-
-```bash
-npm run build                # output in out/
-```
+Deploy schema + functions to Butterbase (see below), then open `/signin`.
 
 ---
 
-## Set your agent loose (MCP tooling)
+## Slack app setup
 
-This repo ships MCP servers so your coding agent can use the shared Neo4j memory
-graph and RocketRide pipelines immediately. Config is in `.cursor/mcp.json`; it
-calls wrapper scripts in `scripts/mcp/` that read secrets from your local
-`.env.local`. **No secrets are committed.**
+1. Create a Slack app at [api.slack.com/apps](https://api.slack.com/apps).
+2. **OAuth & Permissions**
+   - Redirect URL: `https://api.butterbase.ai/v1/{APP_ID}/fn/slack_oauth_callback`
+   - Bot scopes: `app_mentions:read`, `chat:write`, `channels:read`, `groups:read`, `im:read`
+   - User scopes: `channels:history`, `groups:history`, `im:history`, `mpim:history`, `users:read`
+3. **Event Subscriptions** — enable, Request URL:
+   `https://api.butterbase.ai/v1/{APP_ID}/fn/slack_events`
+   - Subscribe to: `app_mention`, `message.channels`, `message.groups`, `message.im`
+4. Install the app to your test workspace.
 
-1. `cp .env.example .env.local` and fill in the values.
-2. Make sure `uv` is installed (`brew install uv`).
-3. Reload your editor (or toggle the servers on in Cursor → Settings → MCP).
+---
 
-`neo4j` and `rocketride` then appear as MCP servers to your agent. See
-[`AGENTS.md`](./AGENTS.md) for the full details on each server, the memory-graph
-entity model, and how to write to memory via `neo4j-cli`.
+## Butterbase deploy checklist
 
-### What each server gives your agent
+1. Apply schema: [`butterbase/schema.json`](butterbase/schema.json) via `manage_schema`.
+2. Apply RLS policies: [`butterbase/rls.json`](butterbase/rls.json) via `manage_rls`.
+3. Deploy functions listed in [`butterbase/functions.json`](butterbase/functions.json) (each `.ts` in `butterbase/`).
+4. Set function **envVars** (see `.env.example` comments): Slack credentials, `SESSION_JWT_SECRET`, `INTERNAL_CRON_SECRET`, `FUNCTIONS_BASE_URL`, `FRONTEND_URL`, Neo4j, Nebius.
+5. Apply Neo4j schema:
+   ```bash
+   cat butterbase/graph-schema.cypher | neo4j-cli query --credential aura --rw
+   ```
+6. Build + deploy frontend: `npm run build` → upload `out/` to Butterbase static hosting.
 
-- **neo4j** — read-only access to the shared Aura memory graph
-  (`(:Entity {name, type, observations, created_at})` nodes). Read-only over MCP
-  by design; write with `neo4j-cli` (see `AGENTS.md`).
-- **rocketride** — exposes every *running* RocketRide pipeline as a callable
-  tool. Pipelines are `.pipe` JSON files in `pipelines/` (start with
-  `pipelines/chat.pipe`, a `Chat → LLM → response` starter). Requires a running
-  RocketRide engine — see `AGENTS.md`.
+---
+
+## Hackathon demo script
+
+1. Open `/signin` → **Connect Slack** (workspace + account).
+2. Land on `/onboarding` — watch channels fill and message counts increment.
+3. When complete, open `/dashboard` for the workspace digest.
+4. In Slack, `@mention` the bot and ask about something from indexed channels.
+5. (Optional) Run RocketRide `pipelines/slack_ingest.pipe` locally for pipeline demos.
+
+Set `INGEST_MAX_MESSAGES=500` on functions to cap backfill for demo workspaces.
 
 ---
 
@@ -88,34 +77,39 @@ entity model, and how to write to memory via `neo4j-cli`.
 
 ```
 savoir/
-├── app/                    # Next.js App Router (UI)
-│   ├── page.tsx            # Account Console: lookup form + recent-accounts table
-│   └── layout.tsx          # Root layout + metadata
-├── lib/
-│   └── butterbase.ts       # Butterbase SDK client + Account type
-├── butterbase/             # Backend definitions deployed to Butterbase
-│   ├── schema.json         # accounts table schema
-│   ├── lookup_account.ts   # serverless function (email → account)
-│   └── graph-schema.cypher # Neo4j memory-graph schema
-├── pipelines/
-│   └── chat.pipe           # RocketRide starter pipeline
-├── scripts/mcp/            # MCP launcher wrappers (secrets from .env.local)
-├── .cursor/mcp.json        # MCP config (neo4j + rocketride, secret-free)
-├── .env.example            # Env var template — copy to .env.local
-└── AGENTS.md               # Agent + MCP setup guide
+├── app/
+│   ├── page.tsx              # Landing
+│   ├── signin/               # Slack OAuth entry
+│   ├── onboarding/           # Ingestion progress
+│   └── dashboard/            # Summaries
+├── butterbase/
+│   ├── schema.json           # Postgres tables
+│   ├── rls.json              # RLS policy definitions
+│   ├── functions.json        # Function deploy manifest
+│   ├── shared/runtime.ts     # Shared function helpers
+│   ├── slack_oauth_*.ts      # OAuth handlers
+│   ├── ingest_next_chunk.ts  # Resumable ingestion worker
+│   ├── enrich_and_merge.ts   # LLM + Neo4j merge
+│   ├── slack_events.ts       # Events API + bot answers
+│   └── graph-schema.cypher   # Neo4j constraints
+├── lib/                      # Frontend session + API helpers
+├── pipelines/                # RocketRide (optional local dev)
+└── scripts/mcp/              # Agent MCP wrappers
 ```
+
+---
 
 ## Environment variables
 
-Copy `.env.example` to `.env.local` and fill in:
+See [`.env.example`](.env.example). Key groups:
 
-| Variable                          | Purpose                                   |
-| --------------------------------- | ----------------------------------------- |
-| `NEXT_PUBLIC_BUTTERBASE_APP_ID`   | Butterbase app the frontend talks to      |
-| `NEXT_PUBLIC_BUTTERBASE_API_URL`  | Butterbase API base URL                   |
-| `NEO4J_URI` / `_USERNAME` / `_PASSWORD` / `_DATABASE` | Aura memory graph (neo4j MCP) |
-| `ROCKETRIDE_URI` / `ROCKETRIDE_AUTH` | RocketRide engine (rocketride MCP)     |
-| `OPENAI_API_KEY`                  | LLM key referenced by `pipelines/*.pipe`  |
+- **Frontend:** `NEXT_PUBLIC_BUTTERBASE_*`
+- **Slack + auth (function env):** `SLACK_*`, `SESSION_JWT_SECRET`, `INTERNAL_CRON_SECRET`
+- **Neo4j:** `NEO4J_*`
+- **LLM:** `NEBIUS_*` (primary) or `OPENAI_API_KEY` (fallback)
 
-`.env.local` is gitignored, so secrets never get pushed. Only `.env.example`
-(placeholders) is committed.
+---
+
+## Agent tooling
+
+See [`AGENTS.md`](./AGENTS.md) for Neo4j + RocketRide MCP setup.

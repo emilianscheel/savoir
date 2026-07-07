@@ -1,26 +1,231 @@
 {
   "tables": {
-    "accounts": {
+    "slack_workspaces": {
       "columns": {
         "id": {
           "type": "uuid",
           "primaryKey": true,
           "default": "gen_random_uuid()"
         },
-        "email": {
+        "slack_team_id": {
           "type": "text",
           "nullable": false,
           "unique": true
         },
-        "plan": {
+        "team_name": {
           "type": "text",
-          "nullable": false,
-          "default": "'free'"
+          "nullable": false
         },
-        "status": {
+        "bot_user_id": {
+          "type": "text",
+          "nullable": true
+        },
+        "bot_access_token": {
+          "type": "text",
+          "nullable": true
+        },
+        "events_verified_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "default": "now()"
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "slack_workspaces_team_idx": {
+          "columns": ["slack_team_id"],
+          "unique": true
+        }
+      }
+    },
+    "slack_users": {
+      "columns": {
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "default": "gen_random_uuid()"
+        },
+        "butterbase_auth_user_id": {
+          "type": "uuid",
+          "nullable": false,
+          "unique": true
+        },
+        "slack_workspace_id": {
+          "type": "uuid",
+          "nullable": false,
+          "references": {
+            "table": "slack_workspaces",
+            "column": "id"
+          }
+        },
+        "slack_user_id": {
+          "type": "text",
+          "nullable": false
+        },
+        "display_name": {
+          "type": "text",
+          "nullable": true
+        },
+        "email": {
+          "type": "text",
+          "nullable": true
+        },
+        "ingestion_status": {
           "type": "text",
           "nullable": false,
-          "default": "'active'"
+          "default": "'pending'"
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "default": "now()"
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "slack_users_workspace_user_idx": {
+          "columns": ["slack_workspace_id", "slack_user_id"],
+          "unique": true
+        },
+        "slack_users_auth_idx": {
+          "columns": ["butterbase_auth_user_id"],
+          "unique": true
+        }
+      }
+    },
+    "slack_tokens": {
+      "columns": {
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "default": "gen_random_uuid()"
+        },
+        "slack_user_id": {
+          "type": "uuid",
+          "nullable": false,
+          "unique": true,
+          "references": {
+            "table": "slack_users",
+            "column": "id"
+          }
+        },
+        "user_access_token": {
+          "type": "text",
+          "nullable": false
+        },
+        "scope": {
+          "type": "text",
+          "nullable": true
+        },
+        "refresh_token": {
+          "type": "text",
+          "nullable": true
+        },
+        "expires_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "revoked_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "token_version": {
+          "type": "integer",
+          "nullable": false,
+          "default": "1"
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "default": "now()"
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "slack_tokens_user_idx": {
+          "columns": ["slack_user_id"],
+          "unique": true
+        }
+      }
+    },
+    "slack_messages": {
+      "columns": {
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "default": "gen_random_uuid()"
+        },
+        "slack_user_id": {
+          "type": "uuid",
+          "nullable": false,
+          "references": {
+            "table": "slack_users",
+            "column": "id"
+          }
+        },
+        "slack_workspace_id": {
+          "type": "uuid",
+          "nullable": false,
+          "references": {
+            "table": "slack_workspaces",
+            "column": "id"
+          }
+        },
+        "slack_message_id": {
+          "type": "text",
+          "nullable": false,
+          "unique": true
+        },
+        "channel_id": {
+          "type": "text",
+          "nullable": false
+        },
+        "channel_name": {
+          "type": "text",
+          "nullable": true
+        },
+        "author_slack_id": {
+          "type": "text",
+          "nullable": true
+        },
+        "text": {
+          "type": "text",
+          "nullable": false
+        },
+        "ts": {
+          "type": "text",
+          "nullable": false
+        },
+        "thread_ts": {
+          "type": "text",
+          "nullable": true
+        },
+        "summary": {
+          "type": "text",
+          "nullable": true
+        },
+        "topics": {
+          "type": "jsonb",
+          "nullable": true
+        },
+        "enrichment_status": {
+          "type": "text",
+          "nullable": false,
+          "default": "'pending'"
+        },
+        "neo4j_merged_at": {
+          "type": "timestamptz",
+          "nullable": true
         },
         "created_at": {
           "type": "timestamptz",
@@ -28,8 +233,122 @@
         }
       },
       "indexes": {
-        "accounts_email_idx": {
-          "columns": ["email"],
+        "slack_messages_slack_id_idx": {
+          "columns": ["slack_message_id"],
+          "unique": true
+        },
+        "slack_messages_user_channel_idx": {
+          "columns": ["slack_user_id", "channel_id"]
+        },
+        "slack_messages_workspace_idx": {
+          "columns": ["slack_workspace_id"]
+        }
+      }
+    },
+    "ingestion_jobs": {
+      "columns": {
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "default": "gen_random_uuid()"
+        },
+        "slack_user_id": {
+          "type": "uuid",
+          "nullable": false,
+          "references": {
+            "table": "slack_users",
+            "column": "id"
+          }
+        },
+        "status": {
+          "type": "text",
+          "nullable": false,
+          "default": "'queued'"
+        },
+        "total_channels": {
+          "type": "integer",
+          "nullable": false,
+          "default": "0"
+        },
+        "completed_channels": {
+          "type": "integer",
+          "nullable": false,
+          "default": "0"
+        },
+        "fetched_messages": {
+          "type": "integer",
+          "nullable": false,
+          "default": "0"
+        },
+        "channel_progress": {
+          "type": "jsonb",
+          "nullable": false,
+          "default": "'[]'::jsonb"
+        },
+        "cursor": {
+          "type": "jsonb",
+          "nullable": true
+        },
+        "channels": {
+          "type": "jsonb",
+          "nullable": true
+        },
+        "error": {
+          "type": "text",
+          "nullable": true
+        },
+        "started_at": {
+          "type": "timestamptz",
+          "default": "now()"
+        },
+        "finished_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "ingestion_jobs_user_idx": {
+          "columns": ["slack_user_id"]
+        }
+      }
+    },
+    "workspace_summaries": {
+      "columns": {
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "default": "gen_random_uuid()"
+        },
+        "slack_user_id": {
+          "type": "uuid",
+          "nullable": false,
+          "unique": true,
+          "references": {
+            "table": "slack_users",
+            "column": "id"
+          }
+        },
+        "summary_text": {
+          "type": "text",
+          "nullable": false
+        },
+        "message_count": {
+          "type": "integer",
+          "nullable": false,
+          "default": "0"
+        },
+        "generated_at": {
+          "type": "timestamptz",
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "workspace_summaries_user_idx": {
+          "columns": ["slack_user_id"],
           "unique": true
         }
       }

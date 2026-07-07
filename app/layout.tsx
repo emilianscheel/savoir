@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Account Console — AWS Builder Hackathon",
-  description: "Next.js frontend backed by Butterbase (HackwithBay 3.0)",
+  title: "Savoir — Slack knowledge platform",
+  description: "Slack ingestion, Neo4j graph, and AI bot — HackwithBay 3.0",
 };
 
 export default function RootLayout({
