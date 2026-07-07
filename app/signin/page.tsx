@@ -14,7 +14,7 @@ function SignInContent() {
   const step = params.get("step");
 
   return (
-    <AppShell width="sm">
+    <AppShell>
       <PageHeader
         title="Connect Slack"
         description="Add the bot, then authorize your account to index history."

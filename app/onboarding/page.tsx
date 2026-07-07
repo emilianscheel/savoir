@@ -80,7 +80,7 @@ export default function OnboardingPage() {
   const needsSignIn = !session?.access_token || error === "Sign in required";
 
   return (
-    <AppShell width="md">
+    <AppShell>
       <PageHeader title="Indexing" />
 
       {needsSignIn && (

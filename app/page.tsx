@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 
 export default function Home() {
   return (
-    <AppShell width="sm">
+    <AppShell>
       <PageHeader
         title="Slack knowledge platform"
         description="Index workspace messages into Neo4j and ask @Savoir in Slack."
