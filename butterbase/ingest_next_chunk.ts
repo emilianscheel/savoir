@@ -1,10 +1,10 @@
 import {
-  enrichMessage,
   ingestMaxMessages,
   json,
   mergeMessageToNeo4j,
   messageId,
   requireEnv,
+  routeMessageEnrichment,
   slackApi,
   type FunctionContext,
   type SlackChannel,
@@ -26,6 +26,8 @@ async function authorizeInternal(req: Request, ctx: FunctionContext): Promise<bo
   const auth = req.headers.get("Authorization");
   const secret = ctx.env.INTERNAL_CRON_SECRET;
   if (secret && auth === `Bearer ${secret}`) return true;
+  // Butterbase cron trigger has no Authorization header
+  if (new URL(req.url).pathname.includes("/cron/")) return true;
   return false;
 }
 
@@ -78,10 +80,14 @@ export default async function handler(req: Request, ctx: FunctionContext): Promi
 
   let channels = (job.channels as SlackChannel[] | null) ?? null;
   if (!channels) {
+    const channelTypes =
+      ctx.env.SLACK_SCOPE_PROFILE === "full"
+        ? "public_channel,private_channel,im,mpim"
+        : "public_channel";
     const list = await slackApi<{ channels?: SlackChannel[] }>(
       "conversations.list",
       user.user_access_token as string,
-      { types: "public_channel,private_channel,im,mpim", limit: 200 },
+      { types: channelTypes, limit: 200 },
     );
     if (!list.ok || !list.channels) {
       await ctx.db.query(
@@ -232,7 +238,12 @@ async function enrichAndStore(
   msg: { ts: string; text?: string; user?: string; thread_ts?: string },
   channel: SlackChannel,
 ): Promise<void> {
-  const enrichment = await enrichMessage(ctx, msg.text || "");
+  const enrichment = await routeMessageEnrichment(ctx, {
+    slack_message_id: slackMessageId,
+    text: msg.text || "",
+    channel_name: channel.name || channel.id,
+  });
+  if (enrichment.deferred) return;
   await ctx.db.query(
     `UPDATE slack_messages SET summary = $2, topics = $3::jsonb, enrichment_status = 'done'
      WHERE slack_message_id = $1`,

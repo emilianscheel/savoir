@@ -6,7 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "neo4j:schema": "node scripts/apply-neo4j-schema.mjs",
+    "smoke:nebius": "node scripts/smoke-test-nebius.mjs",
+    "deploy:butterbase": "node scripts/deploy-butterbase-api.mjs",
+    "re-enrich": "node scripts/re-enrich-messages.mjs",
+    "rocketride:start": "node scripts/start-rocketride-pipeline.mjs"
   },
   "dependencies": {
     "@butterbase/sdk": "^2.8.1",

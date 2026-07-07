@@ -25,14 +25,28 @@ No secrets are committed.
 | `slack_oauth_callback` | Store tokens, start ingestion, mint session JWT |
 | `ingest_next_chunk` | Resumable history fetch (cron + self-chain) |
 | `get_ingestion_status` | Poll job progress for `/onboarding` |
-| `enrich_and_merge` | Nebius summary/topics → Neo4j MERGE |
-| `slack_events` | Events API + `@bot` answers from Neo4j |
+| `enrich_and_merge` | LLM enrichment (or RocketRide handoff) → Neo4j MERGE |
+| `slack_events` | Slack Events API (fast ack; delegates work) |
+| `slack_bot_answer` | Neo4j context + Kimi answer → `chat.postMessage` |
 | `generate_workspace_summary` | Precomputed dashboard digest |
 | `get_dashboard_data` | Authenticated dashboard API |
 
-Shared logic: `butterbase/shared/runtime.ts` (Slack API, JWT session, Neo4j HTTP, Nebius).
+Shared logic: `butterbase/shared/runtime.ts` (Slack API, JWT session, Neo4j HTTP, Nebius, RocketRide routing).
 
-**Production ingestion does not require RocketRide.** The optional `pipelines/slack_ingest.pipe` mirrors enrichment for local engine demos.
+## Data pipeline (visible in code)
+
+```
+Slack message / @mention
+  → slack_events.ts          (verify signature, return 200 quickly)
+  → enrich_and_merge.ts      (Nebius Kimi OR ROCKETRIDE_WEBHOOK_URL)
+  → mergeMessageToNeo4j()    (Person, Team, SlackMessage, Topic entities)
+  → Neo4j Aura
+
+@Savoir New mention
+  → slack_events.ts → slack_bot_answer.ts → Neo4j + Kimi → Slack reply
+```
+
+Optional RocketRide cloud path: set `ROCKETRIDE_WEBHOOK_URL` on Butterbase functions and run `npm run rocketride:start` against `https://api.rocketride.ai` or your VM. See `pipelines/slack_ingest.pipe`.
 
 Neo4j graph model: `Team`, `Person`, `SlackMessage`, `Topic` — see `butterbase/graph-schema.cypher`.
 
@@ -46,4 +60,4 @@ Apply graph schema: `cat butterbase/graph-schema.cypher | neo4j-cli query --cred
 ## Pipelines
 
 - `pipelines/chat.pipe` — starter chat pipeline
-- `pipelines/slack_ingest.pipe` — optional local enrichment (not production path)
+- `pipelines/slack_ingest.pipe` — cloud/local RocketRide enrichment (when `ROCKETRIDE_WEBHOOK_URL` is set)

@@ -1,14 +1,10 @@
 import {
-  chatCompletion,
   json,
-  mergeMessageToNeo4j,
   messageId,
-  queryNeo4jContext,
   requireEnv,
-  slackApi,
   verifySlackSignatureAsync,
   type FunctionContext,
-} from "./shared/runtime.js";
+} from "./shared/runtime-events.js";
 
 export default async function handler(req: Request, ctx: FunctionContext): Promise<Response> {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
@@ -30,8 +26,11 @@ export default async function handler(req: Request, ctx: FunctionContext): Promi
     };
   };
 
-  if (payload.type === "url_verification") {
-    return json({ challenge: payload.challenge });
+  if (payload.type === "url_verification" && payload.challenge) {
+    return new Response(JSON.stringify({ challenge: payload.challenge }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   const signingSecret = requireEnv(ctx, "SLACK_SIGNING_SECRET");
@@ -50,7 +49,16 @@ export default async function handler(req: Request, ctx: FunctionContext): Promi
   if (event.bot_id) return json({ ok: true, ignored: "bot_message" });
 
   if (event.type === "app_mention") {
-    ctx.waitUntil(handleAppMention(ctx, payload.team_id, event));
+    ctx.waitUntil(
+      fetch(`${requireEnv(ctx, "FUNCTIONS_BASE_URL")}/slack_bot_answer`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${requireEnv(ctx, "INTERNAL_CRON_SECRET")}`,
+        },
+        body: JSON.stringify({ team_id: payload.team_id, event }),
+      }),
+    );
     return json({ ok: true });
   }
 
@@ -113,46 +121,5 @@ async function handleMessageEvent(
       Authorization: `Bearer ${requireEnv(ctx, "INTERNAL_CRON_SECRET")}`,
     },
     body: JSON.stringify({ slack_message_id: slackMessageId }),
-  });
-}
-
-async function handleAppMention(
-  ctx: FunctionContext,
-  teamId: string,
-  event: { text?: string; user?: string; channel?: string; ts?: string },
-): Promise<void> {
-  const { rows } = await ctx.db.query(
-    `SELECT su.id, su.ingestion_status, sw.bot_access_token, sw.team_name
-     FROM slack_workspaces sw
-     JOIN slack_users su ON su.slack_workspace_id = sw.id
-     WHERE sw.slack_team_id = $1
-     LIMIT 1`,
-    [teamId],
-  );
-  const row = rows[0];
-  if (!row?.bot_access_token) return;
-
-  const question = (event.text || "").replace(/<@[^>]+>/g, "").trim();
-
-  if (row.ingestion_status !== "complete") {
-    await slackApi("chat.postMessage", row.bot_access_token as string, {
-      channel: event.channel!,
-      thread_ts: event.ts,
-      text: "Still indexing your workspace — I'll be able to answer soon.",
-    });
-    return;
-  }
-
-  const context = await queryNeo4jContext(ctx, teamId, question);
-  const answer = await chatCompletion(
-    ctx,
-    "You answer questions about Slack workspace knowledge. Use only the provided context. Cite channel and timestamp when relevant. If unknown, say so.",
-    `Context:\n${context}\n\nQuestion: ${question}`,
-  );
-
-  await slackApi("chat.postMessage", row.bot_access_token as string, {
-    channel: event.channel!,
-    thread_ts: event.ts,
-    text: answer,
-  });
+  }).catch(() => undefined);
 }

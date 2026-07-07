@@ -1,6 +1,7 @@
 {
     "name": "slack_ingest",
-    "description": "Optional local-dev enrichment pipeline. Production ingestion uses Butterbase enrich_and_merge function. webhook -> extract_data (LLM) -> HTTP merge.",
+    "description": "Cloud RocketRide enrichment pipeline. Butterbase POSTs Slack messages to the webhook source; LLM enriches; merge callback lands in Neo4j via enrich_and_merge.",
+    "source": "source_1",
     "nodes": [
         {
             "id": "source_1",
@@ -11,7 +12,9 @@
             "provider": "extract_data",
             "config": {
                 "instructions": [
-                    "Extract summary and topics from each Slack message in the batch JSON."
+                    "From the Slack message JSON, extract summary and 0-5 topic tags.",
+                    "Input fields: slack_message_id, text, channel_name, merge_callback_url.",
+                    "Output JSON: {\"slack_message_id\":\"...\",\"summary\":\"...\",\"topics\":[\"...\"],\"merge_only\":true}"
                 ],
                 "parameters": {}
             },
@@ -35,19 +38,6 @@
             "control": [
                 {
                     "classType": "llm",
-                    "from": "extract_1"
-                }
-            ]
-        },
-        {
-            "id": "http_1",
-            "provider": "tool_http_request",
-            "config": {
-                "type": "tool_http_request"
-            },
-            "control": [
-                {
-                    "classType": "tool",
                     "from": "extract_1"
                 }
             ]

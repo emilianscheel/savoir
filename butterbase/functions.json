@@ -36,6 +36,12 @@
     {
       "name": "slack_events",
       "file": "slack_events.ts",
+      "runtime": "shared/runtime-events.ts",
+      "trigger": { "type": "http", "config": { "method": "POST", "auth": "none" } }
+    },
+    {
+      "name": "slack_bot_answer",
+      "file": "slack_bot_answer.ts",
       "trigger": { "type": "http", "config": { "method": "POST", "auth": "none" } }
     },
     {
@@ -61,6 +67,8 @@
     "NEBIUS_BASE_URL",
     "NEBIUS_MODEL",
     "OPENAI_API_KEY",
-    "INGEST_MAX_MESSAGES"
+    "INGEST_MAX_MESSAGES",
+    "ROCKETRIDE_WEBHOOK_URL",
+    "ROCKETRIDE_AUTH"
   ]
 }

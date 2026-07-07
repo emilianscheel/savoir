@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+butterbase/.bundled/
 
 # debug
 npm-debug.log*

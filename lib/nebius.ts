@@ -39,7 +39,7 @@ export function defaultNebiusConfig(): NebiusConfig | null {
   if (!apiKey) return null;
   return {
     apiKey,
-    baseUrl: process.env.NEBIUS_BASE_URL || "https://api.tokenfactory.nebius.com/v1",
-    model: process.env.NEBIUS_MODEL || "meta-llama/Meta-Llama-3.1-70B-Instruct-fast",
+    baseUrl: process.env.NEBIUS_BASE_URL || "https://api.tokenfactory.us-central1.nebius.com/v1",
+    model: process.env.NEBIUS_MODEL || "moonshotai/Kimi-K2.7-Code",
   };
 }

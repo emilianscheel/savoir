@@ -1,8 +1,7 @@
 import {
-  enrichMessage,
   json,
   mergeMessageToNeo4j,
-  requireEnv,
+  routeMessageEnrichment,
   type FunctionContext,
 } from "./shared/runtime.js";
 
@@ -11,14 +10,74 @@ async function authorizeInternal(req: Request, ctx: FunctionContext): Promise<bo
   return !!(ctx.env.INTERNAL_CRON_SECRET && auth === `Bearer ${ctx.env.INTERNAL_CRON_SECRET}`);
 }
 
+interface EnrichBody {
+  slack_message_id?: string;
+  messages?: { slack_message_id: string }[];
+  summary?: string;
+  topics?: string[];
+  merge_only?: boolean;
+}
+
+async function processRow(
+  ctx: FunctionContext,
+  row: Record<string, unknown>,
+  enrichment: { summary: string; topics: string[] },
+): Promise<string> {
+  await ctx.db.query(
+    `UPDATE slack_messages SET summary = $2, topics = $3::jsonb, enrichment_status = 'done'
+     WHERE id = $1`,
+    [row.id, enrichment.summary, JSON.stringify(enrichment.topics)],
+  );
+
+  await mergeMessageToNeo4j(ctx, {
+    teamId: row.slack_team_id as string,
+    teamName: row.team_name as string,
+    slackUserId: (row.author_slack_id as string) || "unknown",
+    authorName: (row.author_slack_id as string) || "unknown",
+    messageId: row.slack_message_id as string,
+    channelId: row.channel_id as string,
+    channelName: (row.channel_name as string) || (row.channel_id as string),
+    text: row.text as string,
+    ts: row.ts as string,
+    threadTs: (row.thread_ts as string) || undefined,
+    summary: enrichment.summary,
+    topics: enrichment.topics,
+  });
+
+  await ctx.db.query(
+    `UPDATE slack_messages SET neo4j_merged_at = now() WHERE id = $1`,
+    [row.id],
+  );
+
+  return row.slack_message_id as string;
+}
+
+async function processBatch(
+  ctx: FunctionContext,
+  rows: Record<string, unknown>[],
+  precomputed?: Map<string, { summary: string; topics: string[] }>,
+): Promise<string[]> {
+  const processed: string[] = [];
+  for (const row of rows) {
+    const id = row.slack_message_id as string;
+    const pre = precomputed?.get(id);
+    if (pre) {
+      processed.push(await processRow(ctx, row, pre));
+      continue;
+    }
+
+    const enrichment = await routeMessageEnrichment(ctx, row);
+    if (enrichment.deferred) continue;
+    processed.push(await processRow(ctx, row, enrichment));
+  }
+  return processed;
+}
+
 export default async function handler(req: Request, ctx: FunctionContext): Promise<Response> {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
   const isInternal = await authorizeInternal(req, ctx);
-  const body = (await req.json()) as {
-    slack_message_id?: string;
-    messages?: { slack_message_id: string }[];
-  };
+  const body = (await req.json()) as EnrichBody;
 
   const ids: string[] = [];
   if (body.slack_message_id) ids.push(body.slack_message_id);
@@ -42,37 +101,17 @@ export default async function handler(req: Request, ctx: FunctionContext): Promi
     ids.length ? [ids] : [],
   );
 
-  const processed: string[] = [];
+  if (rows.length === 0) return json({ ok: true, processed: [] });
 
-  for (const row of rows) {
-    const enrichment = await enrichMessage(ctx, row.text as string);
-    await ctx.db.query(
-      `UPDATE slack_messages SET summary = $2, topics = $3::jsonb, enrichment_status = 'done'
-       WHERE id = $1`,
-      [row.id, enrichment.summary, JSON.stringify(enrichment.topics)],
-    );
-
-    await mergeMessageToNeo4j(ctx, {
-      teamId: row.slack_team_id as string,
-      teamName: row.team_name as string,
-      slackUserId: (row.author_slack_id as string) || "unknown",
-      authorName: (row.author_slack_id as string) || "unknown",
-      messageId: row.slack_message_id as string,
-      channelId: row.channel_id as string,
-      channelName: (row.channel_name as string) || (row.channel_id as string),
-      text: row.text as string,
-      ts: row.ts as string,
-      threadTs: (row.thread_ts as string) || undefined,
-      summary: enrichment.summary,
-      topics: enrichment.topics,
+  const precomputed = new Map<string, { summary: string; topics: string[] }>();
+  if (body.merge_only && body.slack_message_id && body.summary) {
+    precomputed.set(body.slack_message_id, {
+      summary: body.summary,
+      topics: Array.isArray(body.topics) ? body.topics : [],
     });
-
-    await ctx.db.query(
-      `UPDATE slack_messages SET neo4j_merged_at = now() WHERE id = $1`,
-      [row.id],
-    );
-    processed.push(row.slack_message_id as string);
   }
 
-  return json({ ok: true, processed });
+  ctx.waitUntil(processBatch(ctx, rows, precomputed.size ? precomputed : undefined));
+
+  return json({ ok: true, queued: rows.length });
 }

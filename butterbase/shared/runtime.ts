@@ -243,6 +243,34 @@ export async function enrichMessage(
   }
 }
 
+export type RoutedEnrichment = EnrichmentResult & { deferred?: boolean };
+
+/** Enrich inline (Nebius) or hand off to RocketRide webhook when ROCKETRIDE_WEBHOOK_URL is set. */
+export async function routeMessageEnrichment(
+  ctx: FunctionContext,
+  row: Record<string, unknown>,
+): Promise<RoutedEnrichment> {
+  const webhook = ctx.env.ROCKETRIDE_WEBHOOK_URL;
+  if (webhook) {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (ctx.env.ROCKETRIDE_AUTH) {
+      headers.Authorization = `Bearer ${ctx.env.ROCKETRIDE_AUTH}`;
+    }
+    const res = await fetch(webhook, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        slack_message_id: row.slack_message_id,
+        text: row.text,
+        channel_name: row.channel_name,
+        merge_callback_url: `${requireEnv(ctx, "FUNCTIONS_BASE_URL")}/enrich_and_merge`,
+      }),
+    });
+    if (res.ok) return { summary: "", topics: [], deferred: true };
+  }
+  return enrichMessage(ctx, (row.text as string) || "");
+}
+
 export async function chatCompletion(
   ctx: FunctionContext,
   system: string,
@@ -262,6 +290,7 @@ export async function chatCompletion(
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
+    signal: AbortSignal.timeout(55_000),
     body: JSON.stringify({
       model,
       temperature: 0.3,

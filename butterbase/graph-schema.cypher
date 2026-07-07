@@ -2,7 +2,8 @@
 // savoir knowledge graph — schema (Neo4j / Aura)
 //
 // Recreate everything with one command (from the savoir/ repo root):
-//   cat butterbase/graph-schema.cypher | neo4j-cli query --credential aura --rw
+//   npm run neo4j:schema
+//   # or: cat butterbase/graph-schema.cypher | neo4j-cli query --credential aura --rw
 //
 // Everything is idempotent (IF NOT EXISTS), so it is safe to re-run.
 // Statements are split on a ';' at end of line by neo4j-cli.
