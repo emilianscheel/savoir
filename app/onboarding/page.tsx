@@ -18,6 +18,7 @@ import {
 import { invokeFunction } from "@/lib/api";
 import {
     applySessionFromUrl,
+    disconnectSession,
     loadSession,
     saveSession,
     type SessionData,
@@ -31,6 +32,7 @@ import {
     Radio,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { AppShell } from "../components/AppShell";
 import { ChannelTable } from "../components/ChannelTable";
@@ -106,6 +108,7 @@ function StatCard({
 }
 
 export default function OnboardingPage() {
+    const router = useRouter();
     const [hydrated, setHydrated] = useState(false);
     const [session, setSession] = useState<SessionData | null>(null);
     const [status, setStatus] = useState<IngestionStatus | null>(null);
@@ -168,6 +171,13 @@ export default function OnboardingPage() {
         (ch) => ch.status === "fetching",
     );
     const messageCount = job?.fetched_messages ?? recentMessages.length;
+
+    function handleDisconnect() {
+        disconnectSession();
+        setSession(null);
+        setStatus(null);
+        router.push("/signin");
+    }
 
     if (!hydrated) {
         return (
@@ -265,34 +275,44 @@ export default function OnboardingPage() {
                                     background
                                 </CardDescription>
                             </div>
-                            <Badge
-                                variant={isComplete ? "secondary" : "default"}
-                                className={
-                                    isComplete
-                                        ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                                        : ""
-                                }
-                            >
-                                {isComplete ? (
-                                    <>
-                                        <CheckCircle2 data-icon="inline-start" />
-                                        Ready
-                                    </>
-                                ) : isRunning || polling ? (
-                                    <>
-                                        <Loader2
-                                            data-icon="inline-start"
-                                            className="animate-spin"
-                                        />
-                                        Live
-                                    </>
-                                ) : (
-                                    <>
-                                        <Radio data-icon="inline-start" />
-                                        Connected
-                                    </>
-                                )}
-                            </Badge>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <Badge
+                                    variant={isComplete ? "secondary" : "default"}
+                                    className={
+                                        isComplete
+                                            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                                            : ""
+                                    }
+                                >
+                                    {isComplete ? (
+                                        <>
+                                            <CheckCircle2 data-icon="inline-start" />
+                                            Ready
+                                        </>
+                                    ) : isRunning || polling ? (
+                                        <>
+                                            <Loader2
+                                                data-icon="inline-start"
+                                                className="animate-spin"
+                                            />
+                                            Live
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Radio data-icon="inline-start" />
+                                            Connected
+                                        </>
+                                    )}
+                                </Badge>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-muted-foreground"
+                                    onClick={handleDisconnect}
+                                >
+                                    Disconnect
+                                </Button>
+                            </div>
                         </div>
                     </CardHeader>
                     <CardContent className="pt-4">

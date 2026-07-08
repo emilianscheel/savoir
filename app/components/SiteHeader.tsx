@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useLayoutEffect, useState } from "react";
 import { CheckCircle2 } from "lucide-react";
-import { loadSession } from "@/lib/session";
+import { disconnectSession, loadSession } from "@/lib/session";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "./ThemeToggle";
 
 const links = [
@@ -19,6 +20,7 @@ function isConnected(): boolean {
 
 export function SiteHeader() {
   const pathname = usePathname();
+  const router = useRouter();
   const [connected, setConnected] = useState(false);
 
   useLayoutEffect(() => {
@@ -33,6 +35,11 @@ export function SiteHeader() {
     };
   }, [pathname]);
 
+  function handleDisconnect() {
+    disconnectSession();
+    router.push("/signin");
+  }
+
   const connectHref = connected ? "/onboarding" : "/signin";
   const connectLabel = connected ? "Connected" : "Connect";
   const connectActive = connected
@@ -42,10 +49,10 @@ export function SiteHeader() {
   return (
     <header className="mb-10 flex items-center justify-between gap-4">
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-        <Link href="/onboarding" className="text-sm font-semibold tracking-tight">
+        <Link href="/" className="text-sm font-semibold tracking-tight">
           Savoir
         </Link>
-        <nav className="flex flex-wrap gap-4 text-sm">
+        <nav className="flex flex-wrap items-center gap-4 text-sm">
           <Link
             href={connectHref}
             className={cn(
@@ -59,6 +66,16 @@ export function SiteHeader() {
             {connected && <CheckCircle2 className="size-3.5" aria-hidden />}
             {connectLabel}
           </Link>
+          {connected && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-auto px-0 text-muted-foreground hover:text-foreground"
+              onClick={handleDisconnect}
+            >
+              Disconnect
+            </Button>
+          )}
           {links.map(({ href, label }) => (
             <Link
               key={href}

@@ -28,6 +28,18 @@ export function clearSession(): void {
   window.dispatchEvent(new Event("savoir:session-changed"));
 }
 
+/** Clear browser session so the user can disconnect and reconnect Slack. */
+export function disconnectSession(): void {
+  if (typeof window === "undefined") return;
+  clearSession();
+  for (let i = sessionStorage.length - 1; i >= 0; i--) {
+    const key = sessionStorage.key(i);
+    if (key?.startsWith("savoir_oauth_exchange:")) {
+      sessionStorage.removeItem(key);
+    }
+  }
+}
+
 /** Parse #access_token=... from OAuth redirect hash (legacy). */
 export function parseOAuthHash(): SessionData | null {
   if (typeof window === "undefined") return null;
